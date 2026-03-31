@@ -1,0 +1,21 @@
+{
+  "name": "AptManager - Apartment Management",
+  "short_name": "AptManager",
+  "description": "Manage your apartment maintenance and payments with ease.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#171717",
+  "icons": [
+    {
+      "src": "https://ui-avatars.com/api/?name=AptManager&background=171717&color=fff&size=192",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://ui-avatars.com/api/?name=AptManager&background=171717&color=fff&size=512",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

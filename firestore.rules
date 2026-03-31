@@ -1,0 +1,126 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {uid}
+    // Fields:
+    //   - uid: string (required)
+    //   - email: string (required)
+    //   - displayName: string
+    //   - photoURL: string
+    //   - role: string (admin/owner)
+    //   - unitNumber: string
+    //   - createdAt: timestamp
+    //
+    // Collection: payments
+    // Document ID: {paymentId}
+    // Fields:
+    //   - ownerUid: string (required)
+    //   - ownerName: string
+    //   - unitNumber: string
+    //   - amount: number (required)
+    //   - month: string (required)
+    //   - status: string (pending/paid/failed)
+    //   - paymentMethod: string
+    //   - transactionId: string
+    //   - createdAt: timestamp
+    //   - paidAt: timestamp
+    //
+    // Collection: announcements
+    // Document ID: {announcementId}
+    // Fields:
+    //   - title: string (required)
+    //   - content: string (required)
+    //   - authorUid: string
+    //   - createdAt: timestamp
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "jkrsanskrit@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'role']) &&
+             data.uid is string &&
+             data.email is string &&
+             data.role in ['admin', 'owner'] &&
+             (!('mustChangePassword' in data) || data.mustChangePassword is bool);
+    }
+
+    function isValidPayment(data) {
+      return data.keys().hasAll(['ownerUid', 'amount', 'month', 'status']) &&
+             data.ownerUid is string &&
+             data.amount is number && data.amount > 0 &&
+             data.month is string &&
+             data.status in ['pending', 'paid', 'failed', 'verifying', 'PAID', 'FAILED'];
+    }
+
+    function isValidAnnouncement(data) {
+      return data.keys().hasAll(['title', 'content']) &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.content is string && data.content.size() > 0 && data.content.size() < 5000;
+    }
+
+    function isValidAccount(data) {
+      return data.keys().hasAll(['date', 'particulars', 'income', 'expense', 'method']) &&
+             data.date is timestamp &&
+             data.particulars is string && data.particulars.size() > 0 &&
+             data.income is number && data.income >= 0 &&
+             data.expense is number && data.expense >= 0 &&
+             data.method in ['cash', 'bank'] &&
+             (!('isWithdrawal' in data) || data.isWithdrawal is bool) &&
+             (!('isOpeningBalance' in data) || data.isOpeningBalance is bool) &&
+             (!('amount' in data) || data.amount is number) &&
+             (!('openingIncome' in data) || data.openingIncome is number) &&
+             (!('openingExpense' in data) || data.openingExpense is number) &&
+             (!('createdAt' in data) || data.createdAt is timestamp);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (isOwner(userId) || isAdmin());
+      allow create: if isAuthenticated() && (isOwner(userId) || isAdmin()) && isValidUser(request.resource.data) && (request.resource.data.role == 'owner' || isAdmin());
+      allow update: if isAuthenticated() && (isAdmin() || (isOwner(userId) && isValidUser(request.resource.data)));
+    }
+
+    match /payments/{paymentId} {
+      allow read: if isAuthenticated() && (request.auth.uid == resource.data.ownerUid || isAdmin());
+      allow create: if isAuthenticated() && (request.auth.uid == request.resource.data.ownerUid || isAdmin()) && isValidPayment(request.resource.data);
+      allow update: if isAuthenticated() && (isAdmin() || (request.auth.uid == resource.data.ownerUid && request.resource.data.ownerUid == resource.data.ownerUid && isValidPayment(request.resource.data)));
+      allow delete: if isAdmin();
+    }
+
+    match /announcements/{announcementId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() && isValidAnnouncement(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /accounts/{accountId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() && isValidAccount(request.resource.data);
+      allow delete: if isAdmin();
+    }
+  }
+}

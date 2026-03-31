@@ -1,0 +1,89 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with role (admin/owner)",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "owner"] },
+        "unitNumber": { "type": "string", "description": "For owners only" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "mustChangePassword": { "type": "boolean" },
+        "isPending": { "type": "boolean" },
+        "tempPassword": { "type": "string" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Payment": {
+      "title": "Payment",
+      "description": "Maintenance payment record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ownerUid": { "type": "string" },
+        "ownerName": { "type": "string" },
+        "unitNumber": { "type": "string" },
+        "amount": { "type": "number" },
+        "month": { "type": "string", "description": "Month of payment (e.g., '2026-03')" },
+        "status": { "type": "string", "enum": ["pending", "paid", "failed"] },
+        "paymentMethod": { "type": "string" },
+        "transactionId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "paidAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerUid", "amount", "month", "status"]
+    },
+    "Announcement": {
+      "title": "Announcement",
+      "description": "Apartment-wide announcements",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "authorUid": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "content", "authorUid"]
+    },
+    "Account": {
+      "title": "Account",
+      "description": "Income and expense records",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "particulars": { "type": "string" },
+        "income": { "type": "number" },
+        "expense": { "type": "number" },
+        "method": { "type": "string", "enum": ["cash", "bank"] },
+        "isWithdrawal": { "type": "boolean" },
+        "amount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["date", "particulars", "income", "expense", "method"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/payments/{paymentId}": {
+      "schema": "Payment",
+      "description": "Payment records"
+    },
+    "/announcements/{announcementId}": {
+      "schema": "Announcement",
+      "description": "Announcements"
+    },
+    "/accounts/{accountId}": {
+      "schema": "Account",
+      "description": "Income and expense records"
+    }
+  }
+}
