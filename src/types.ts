@@ -55,5 +55,10 @@ export interface AccountEntry {
   openingExpense?: number; // Historical expense total
   runningCashBalance?: number;
   runningBankBalance?: number;
+  forMonth?: string; // e.g., "JAN"
+  forYear?: number; // e.g., 2026
+  isAdvanceAllocation?: boolean;
+  originalPaymentDate?: any; // Timestamp
+  displayAmount?: number;
   createdAt: any;
 }

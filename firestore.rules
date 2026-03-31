@@ -81,13 +81,18 @@ service cloud.firestore {
 
     function isValidAccount(data) {
       return data.keys().hasAll(['date', 'particulars', 'income', 'expense', 'method']) &&
-             data.date is timestamp &&
+             (data.date == null || data.date is timestamp) &&
              data.particulars is string && data.particulars.size() > 0 &&
              data.income is number && data.income >= 0 &&
              data.expense is number && data.expense >= 0 &&
              data.method in ['cash', 'bank'] &&
              (!('isWithdrawal' in data) || data.isWithdrawal is bool) &&
              (!('isOpeningBalance' in data) || data.isOpeningBalance is bool) &&
+             (!('isAdvanceAllocation' in data) || data.isAdvanceAllocation is bool) &&
+             (!('originalPaymentDate' in data) || data.originalPaymentDate is timestamp) &&
+             (!('displayAmount' in data) || data.displayAmount is number) &&
+             (!('forMonth' in data) || data.forMonth is string) &&
+             (!('forYear' in data) || data.forYear is number) &&
              (!('amount' in data) || data.amount is number) &&
              (!('openingIncome' in data) || data.openingIncome is number) &&
              (!('openingExpense' in data) || data.openingExpense is number) &&

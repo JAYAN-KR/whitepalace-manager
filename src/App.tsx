@@ -79,6 +79,13 @@ declare global {
   }
 }
 
+// --- Constants ---
+
+const MONTHS = [
+  'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 
+  'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'
+];
+
 // --- Components ---
 
 enum OperationType {
@@ -1079,7 +1086,15 @@ function QuickMaintenanceForm({ onClose, onSuccess }: { onClose: () => void, onS
   const [amount, setAmount] = useState(1200);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  
+
+  const getPreviousMonth = (d: Date) => {
+    const prev = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+    return {
+      month: MONTHS[prev.getMonth()],
+      year: prev.getFullYear()
+    };
+  };
+
   const initialOwners = [
     { unit: 'A1', name: 'Renjini' },
     { unit: 'A2', name: 'Deepu' },
@@ -1097,21 +1112,33 @@ function QuickMaintenanceForm({ onClose, onSuccess }: { onClose: () => void, onS
     { unit: 'F1', name: 'MohanaKrishnan' },
     { unit: 'F2', name: 'Sudha Dinaker' },
     { unit: 'F3', name: 'Seema Sreekumar' }
-  ].map(o => ({ ...o, selected: false, customAmount: 1200, date: new Date(), months: 1 }));
+  ].map(o => {
+    const prev = getPreviousMonth(new Date());
+    return { 
+      ...o, 
+      selected: false, 
+      customAmount: 1200, 
+      date: new Date(), 
+      months: 1,
+      forMonth: prev.month,
+      forYear: prev.year
+    };
+  });
 
   const [owners, setOwners] = useState(initialOwners);
 
   const handleSyncFromResidents = () => {
-    // This would ideally fetch from the 'users' collection
-    // For now, we'll just show a message or logic to fetch
     onSnapshot(query(collection(db, 'users'), where('role', '==', 'owner')), (snapshot) => {
+      const prev = getPreviousMonth(date);
       const residents = snapshot.docs.map(doc => ({
         unit: doc.data().unitNumber || '?',
         name: doc.data().displayName || 'Unknown',
         selected: false,
         customAmount: 1200,
-        date: new Date(),
-        months: 1
+        date: date,
+        months: 1,
+        forMonth: prev.month,
+        forYear: prev.year
       }));
       if (residents.length > 0) {
         setOwners(residents);
@@ -1133,32 +1160,68 @@ function QuickMaintenanceForm({ onClose, onSuccess }: { onClose: () => void, onS
 
     try {
       for (const owner of selectedOwners) {
-        const monthlyIncome = owner.customAmount / owner.months;
+        const startMonthIdx = MONTHS.indexOf(owner.forMonth);
+        const startForDate = new Date(owner.forYear, startMonthIdx, 1);
+        const endForDate = new Date(owner.forYear, startMonthIdx + owner.months - 1, 1);
+        const endForMonth = MONTHS[endForDate.getMonth()];
+        const endForYear = endForDate.getFullYear();
         
-        for (let i = 0; i < owner.months; i++) {
-          const baseDate = new Date(owner.date);
-          // Create date for the target month, starting at the 1st to avoid rollover issues
-          const entryDate = new Date(baseDate.getFullYear(), baseDate.getMonth() + i, 1);
-          
-          // For the first month, respect the original day selected
-          if (i === 0) {
-            entryDate.setDate(baseDate.getDate());
-          }
-          
-          const particulars = owner.months > 1 
-            ? `${owner.unit} ${owner.name} Maintenance (Month ${i + 1}/${owner.months})`
-            : `${owner.unit} ${owner.name} Monthly Maintenance`;
+        const paymentDate = owner.date;
+        const paymentMonthYear = new Date(paymentDate.getFullYear(), paymentDate.getMonth(), 1);
+        
+        const isAdvance = startForDate >= paymentMonthYear && owner.months > 1;
+        const monthlyAmount = owner.customAmount / owner.months;
 
-          await addDoc(collection(db, 'accounts'), {
-            date: Timestamp.fromDate(entryDate),
-            particulars: particulars,
-            income: monthlyIncome,
-            expense: 0,
-            method: 'bank',
-            isWithdrawal: false,
-            isOpeningBalance: false,
-            createdAt: serverTimestamp()
-          });
+        // 1. Create the main entry on the payment date
+        let description = "";
+        if (isAdvance) {
+          description = `Advance: ${owner.forMonth} to ${endForMonth}`;
+        } else if (owner.months > 1) {
+          description = `${owner.forMonth} to ${endForMonth}`;
+        } else {
+          description = `${endForMonth} ${endForYear}`;
+        }
+
+        const particulars = `${owner.unit} ${owner.name} (${description})`;
+
+        await addDoc(collection(db, 'accounts'), {
+          date: Timestamp.fromDate(paymentDate),
+          particulars: particulars,
+          income: owner.customAmount,
+          expense: 0,
+          method: 'bank',
+          isWithdrawal: false,
+          isOpeningBalance: false,
+          forMonth: endForMonth,
+          forYear: endForYear,
+          createdAt: serverTimestamp()
+        });
+
+        // 2. Create shadow entries for future months (Advance Allocation)
+        for (let i = 0; i < owner.months; i++) {
+          const currentForDate = new Date(owner.forYear, startMonthIdx + i, 1);
+          
+          // Only create shadow entries for months AFTER the payment month
+          if (currentForDate > paymentMonthYear) {
+            const currentForMonth = MONTHS[currentForDate.getMonth()];
+            const currentForYear = currentForDate.getFullYear();
+            
+            await addDoc(collection(db, 'accounts'), {
+              date: null, // No date for shadow entries
+              particulars: `${owner.unit} ${owner.name} (From advance payment of ${MONTHS[paymentDate.getMonth()]})`,
+              income: 0, // Doesn't affect balance
+              displayAmount: monthlyAmount, // For UI display
+              expense: 0,
+              method: 'bank',
+              isWithdrawal: false,
+              isOpeningBalance: false,
+              isAdvanceAllocation: true,
+              originalPaymentDate: Timestamp.fromDate(paymentDate),
+              forMonth: currentForMonth,
+              forYear: currentForYear,
+              createdAt: serverTimestamp()
+            });
+          }
         }
       }
       onSuccess();
@@ -1171,9 +1234,9 @@ function QuickMaintenanceForm({ onClose, onSuccess }: { onClose: () => void, onS
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-neutral-800/30 p-4 rounded-2xl border border-neutral-700">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-neutral-800/30 p-4 rounded-2xl border border-neutral-700">
         <div>
-          <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-2">Bulk Date (Set for all)</label>
+          <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-2">Bulk Payment Date</label>
           <input 
             type="date" 
             value={format(date, 'yyyy-MM-dd')}
@@ -1186,7 +1249,31 @@ function QuickMaintenanceForm({ onClose, onSuccess }: { onClose: () => void, onS
           />
         </div>
         <div>
-          <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-2">Bulk Amount (Set for all)</label>
+          <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-2">Bulk For Month/Year</label>
+          <div className="grid grid-cols-2 gap-2">
+            <select 
+              value={owners[0]?.forMonth || MONTHS[new Date().getMonth()]}
+              onChange={(e) => {
+                const val = e.target.value;
+                setOwners(owners.map(o => ({ ...o, forMonth: val })));
+              }}
+              className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100 text-sm"
+            >
+              {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+            <input 
+              type="number" 
+              value={owners[0]?.forYear || new Date().getFullYear()}
+              onChange={(e) => {
+                const val = Number(e.target.value);
+                setOwners(owners.map(o => ({ ...o, forYear: val })));
+              }}
+              className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100 text-sm"
+            />
+          </div>
+        </div>
+        <div>
+          <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-2">Bulk Amount</label>
           <div className="relative">
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-500 font-bold text-sm">₹</span>
             <input 
@@ -1234,7 +1321,7 @@ function QuickMaintenanceForm({ onClose, onSuccess }: { onClose: () => void, onS
               <p className="text-sm font-bold text-neutral-100 truncate">{owner.unit} {owner.name}</p>
             </div>
             
-            <div className="flex-1 grid grid-cols-3 gap-2">
+            <div className="flex-1 grid grid-cols-4 gap-2">
               <div className="relative">
                 <input 
                   type="date" 
@@ -1245,6 +1332,29 @@ function QuickMaintenanceForm({ onClose, onSuccess }: { onClose: () => void, onS
                     setOwners(newOwners);
                   }}
                   className="w-full px-2 py-2 bg-neutral-800/50 border border-neutral-700 rounded-lg text-[10px] text-neutral-300 focus:ring-1 focus:ring-indigo-500 outline-none"
+                />
+              </div>
+              <div className="relative flex gap-1 items-center">
+                <select
+                  value={owner.forMonth}
+                  onChange={(e) => {
+                    const newOwners = [...owners];
+                    newOwners[idx].forMonth = e.target.value;
+                    setOwners(newOwners);
+                  }}
+                  className="flex-1 min-w-[45px] px-1 py-2 bg-neutral-800/50 border border-neutral-700 rounded-lg text-[10px] text-neutral-300 focus:ring-1 focus:ring-indigo-500 outline-none"
+                >
+                  {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+                <input 
+                  type="number"
+                  value={owner.forYear}
+                  onChange={(e) => {
+                    const newOwners = [...owners];
+                    newOwners[idx].forYear = Number(e.target.value);
+                    setOwners(newOwners);
+                  }}
+                  className="w-12 px-1 py-2 bg-neutral-800/50 border border-neutral-700 rounded-lg text-[10px] text-neutral-300 focus:ring-1 focus:ring-indigo-500 outline-none"
                 />
               </div>
               <div className="relative">
@@ -2436,16 +2546,21 @@ function AccountsManagement({ accounts, isAdmin }: { accounts: AccountEntry[], i
     particulars: '',
     income: 0,
     expense: 0,
-    method: 'bank'
+    method: 'bank',
+    forMonth: MONTHS[new Date().getMonth() === 0 ? 11 : new Date().getMonth() - 1],
+    forYear: new Date().getMonth() === 0 ? new Date().getFullYear() - 1 : new Date().getFullYear()
   });
 
-  const months = [
-    'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 
-    'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'
-  ];
+  const months = MONTHS;
 
   const balances = useMemo(() => {
-    const sortedAll = [...accounts].sort((a, b) => a.date.getTime() - b.date.getTime());
+    const sortedAll = [...accounts]
+      .filter(acc => !acc.isAdvanceAllocation && acc.date) // Only actual transactions affect balance
+      .sort((a, b) => {
+        const dateA = a.date instanceof Date ? a.date : a.date.toDate();
+        const dateB = b.date instanceof Date ? b.date : b.date.toDate();
+        return dateA.getTime() - dateB.getTime();
+      });
     const lastDayOfMonth = new Date(selectedYear, selectedMonth + 1, 0, 23, 59, 59);
 
     let currentCash = 0;
@@ -2501,11 +2616,47 @@ function AccountsManagement({ accounts, isAdmin }: { accounts: AccountEntry[], i
   }, [accounts, selectedMonth, selectedYear]);
 
   const filteredAccounts = useMemo(() => {
-    return balances.accountsWithRunning.filter(acc => {
-      const date = acc.date;
-      return date.getMonth() === selectedMonth && date.getFullYear() === selectedYear;
+    return accounts.filter(acc => {
+      // For actual transactions, check their date
+      if (!acc.isAdvanceAllocation && acc.date) {
+        const date = acc.date instanceof Date ? acc.date : acc.date.toDate();
+        return date.getMonth() === selectedMonth && date.getFullYear() === selectedYear;
+      }
+      // For advance allocations, check their forMonth/forYear
+      if (acc.isAdvanceAllocation) {
+        const monthIdx = MONTHS.indexOf(acc.forMonth || '');
+        return monthIdx === selectedMonth && acc.forYear === selectedYear;
+      }
+      return false;
+    }).sort((a, b) => {
+      // Sort by date if available, otherwise put at the end of the day?
+      // Actually, shadow entries have no date, so they can just be at the bottom.
+      if (a.isAdvanceAllocation && !b.isAdvanceAllocation) return 1;
+      if (!a.isAdvanceAllocation && b.isAdvanceAllocation) return -1;
+      if (a.isAdvanceAllocation && b.isAdvanceAllocation) return 0;
+      
+      const dateA = a.date instanceof Date ? a.date : a.date.toDate();
+      const dateB = b.date instanceof Date ? b.date : b.date.toDate();
+      return dateA.getTime() - dateB.getTime();
+    }).map(acc => {
+      // Attach running balances from the pre-calculated balances.accountsWithRunning
+      const match = balances.accountsWithRunning.find(b => b.id === acc.id);
+      if (match) {
+        return {
+          ...acc,
+          runningCashBalance: match.runningCashBalance,
+          runningBankBalance: match.runningBankBalance
+        };
+      }
+      // If no match (e.g. shadow entry), use the last available balance
+      // We need to find the latest balance BEFORE or ON this month
+      return {
+        ...acc,
+        runningCashBalance: balances.monthEnd.cashInHand,
+        runningBankBalance: balances.monthEnd.cashInBank
+      };
     });
-  }, [balances.accountsWithRunning, selectedMonth, selectedYear]);
+  }, [accounts, balances, selectedMonth, selectedYear]);
 
   const monthlyTotals = useMemo(() => {
     let income = 0;
@@ -2615,6 +2766,8 @@ function AccountsManagement({ accounts, isAdmin }: { accounts: AccountEntry[], i
           amount: (isWithdrawal || isOpeningBalance) ? (newEntry.amount || newEntry.income || newEntry.expense || 0) : 0,
           openingIncome: newEntry.openingIncome || 0,
           openingExpense: newEntry.openingExpense || 0,
+          forMonth: newEntry.forMonth || null,
+          forYear: newEntry.forYear || null,
           date: Timestamp.fromDate(newEntry.date as Date)
         };
 
@@ -2642,7 +2795,9 @@ function AccountsManagement({ accounts, isAdmin }: { accounts: AccountEntry[], i
         openingCash: 0,
         openingBank: 0,
         openingIncome: 0,
-        openingExpense: 0
+        openingExpense: 0,
+        forMonth: MONTHS[new Date().getMonth() === 0 ? 11 : new Date().getMonth() - 1],
+        forYear: new Date().getMonth() === 0 ? new Date().getFullYear() - 1 : new Date().getFullYear()
       });
     } catch (err: any) {
       const errorMessage = err.message || "An unexpected error occurred.";
@@ -2680,7 +2835,9 @@ function AccountsManagement({ accounts, isAdmin }: { accounts: AccountEntry[], i
       openingCash: acc.method === 'cash' ? acc.amount : 0,
       openingBank: acc.method === 'bank' ? acc.amount : 0,
       openingIncome: acc.openingIncome || 0,
-      openingExpense: acc.openingExpense || 0
+      openingExpense: acc.openingExpense || 0,
+      forMonth: acc.forMonth || '',
+      forYear: acc.forYear || new Date().getFullYear()
     });
     setShowAddModal(true);
   };
@@ -2769,6 +2926,7 @@ function AccountsManagement({ accounts, isAdmin }: { accounts: AccountEntry[], i
               <tr className="bg-neutral-800/50">
                 <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest border-r border-neutral-700">Date</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest border-r border-neutral-700">Particulars</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest border-r border-neutral-700">For Month</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest border-r border-neutral-700 text-right">Income (₹)</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest border-r border-neutral-700 text-right">Expense (₹)</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest text-right">Running Balance</th>
@@ -2784,31 +2942,89 @@ function AccountsManagement({ accounts, isAdmin }: { accounts: AccountEntry[], i
                 </tr>
               ) : (
                 filteredAccounts.map((acc) => (
-                  <tr key={acc.id} className="hover:bg-neutral-800/30 transition-colors">
+                  <tr key={acc.id} className={cn(
+                    "hover:bg-neutral-800/30 transition-colors",
+                    acc.isAdvanceAllocation && "bg-yellow-900/5"
+                  )}>
                     <td className="px-6 py-4 border-r border-neutral-700">
-                      <div className="flex items-center gap-2 text-neutral-300 font-medium">
-                        <Calendar size={14} className="text-neutral-500" />
-                        {format(acc.date, 'dd MMM yyyy')}
-                      </div>
+                      {!acc.isAdvanceAllocation && acc.date && (
+                        <div className="flex items-center gap-2 text-neutral-300 font-medium">
+                          <Calendar size={14} className="text-neutral-500" />
+                          {format(acc.date, 'dd MMM yyyy')}
+                        </div>
+                      )}
                     </td>
                     <td className="px-6 py-4 border-r border-neutral-700">
-                      <span className="text-neutral-300">{acc.particulars}</span>
-                      {acc.method === 'bank' && <span className="ml-2 text-[10px] bg-blue-900/30 text-blue-400 px-2 py-0.5 rounded-full font-bold uppercase">Bank</span>}
+                      <span className={cn(
+                        "text-neutral-300",
+                        acc.isAdvanceAllocation && "text-yellow-500/80 italic text-sm"
+                      )}>
+                        {acc.particulars}
+                      </span>
+                      {acc.method === 'bank' && !acc.isAdvanceAllocation && <span className="ml-2 text-[10px] bg-blue-900/30 text-blue-400 px-2 py-0.5 rounded-full font-bold uppercase">Bank</span>}
                       {acc.isWithdrawal && <span className="ml-2 text-[10px] bg-amber-900/30 text-amber-400 px-2 py-0.5 rounded-full font-bold uppercase">Withdrawal</span>}
                       {acc.isOpeningBalance && <span className="ml-2 text-[10px] bg-emerald-900/30 text-emerald-400 px-2 py-0.5 rounded-full font-bold uppercase">Opening Balance</span>}
                     </td>
-                    <td className="px-6 py-4 border-r border-neutral-700 text-right font-bold text-emerald-500">
-                      {acc.isOpeningBalance ? (
-                        <span className="flex flex-col items-end">
+                    <td className="px-6 py-4 border-r border-neutral-700 text-center">
+                      {acc.forMonth ? (
+                        <div className="flex flex-col items-center gap-1">
+                          {!acc.isAdvanceAllocation && (
+                            <span className="text-[8px] uppercase text-neutral-500 font-bold tracking-widest">Paid up to</span>
+                          )}
+                          {(() => {
+                            const forMonthIdx = MONTHS.indexOf(acc.forMonth);
+                            const forDate = new Date(acc.forYear || 0, forMonthIdx, 1);
+                            
+                            let isRed = false;
+                            if (!acc.isAdvanceAllocation && acc.date) {
+                              const pDate = acc.date instanceof Date ? acc.date : acc.date.toDate();
+                              const paymentMonthDate = new Date(pDate.getFullYear(), pDate.getMonth(), 1);
+                              
+                              // User's rule: Payment in Month X is for Month X-1.
+                              // So if forDate < (paymentMonthDate - 1 month), it's a past due.
+                              const expectedForDate = new Date(paymentMonthDate);
+                              expectedForDate.setMonth(expectedForDate.getMonth() - 1);
+                              
+                              isRed = forDate < expectedForDate;
+                            }
+
+                            return (
+                              <div className="flex flex-col items-center gap-1">
+                                <span className={cn(
+                                  "text-[10px] px-2 py-1 rounded-lg font-bold transition-all",
+                                  isRed 
+                                    ? "bg-rose-600 text-white shadow-lg shadow-rose-900/20 scale-110" 
+                                    : "bg-neutral-800 text-neutral-400"
+                                )}>
+                                  {acc.forMonth} {acc.forYear}
+                                </span>
+                                {isRed && (
+                                  <span className="text-[9px] font-black text-rose-500 uppercase tracking-tighter animate-pulse">
+                                    Dues Pending
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      ) : '-'}
+                    </td>
+                    <td className="px-6 py-4 border-r border-neutral-700 text-right font-bold">
+                      {acc.isAdvanceAllocation ? (
+                        <span className="text-yellow-500">₹{acc.displayAmount?.toLocaleString()}</span>
+                      ) : acc.isOpeningBalance ? (
+                        <span className="flex flex-col items-end text-emerald-500">
                           <span>₹{acc.amount?.toLocaleString()}</span>
                           <span className="text-[8px] uppercase tracking-tighter opacity-70 font-normal">Initial</span>
                         </span>
                       ) : acc.isWithdrawal ? (
-                        <span className="flex flex-col items-end">
+                        <span className="flex flex-col items-end text-emerald-500">
                           <span>+₹{acc.amount?.toLocaleString()}</span>
                           <span className="text-[8px] uppercase tracking-tighter opacity-70 font-normal">From Bank</span>
                         </span>
-                      ) : acc.income > 0 ? `+₹${acc.income.toLocaleString()}` : '-'}
+                      ) : acc.income > 0 ? (
+                        <span className="text-emerald-500">+₹{acc.income.toLocaleString()}</span>
+                      ) : '-'}
                     </td>
                     <td className="px-6 py-4 border-r border-neutral-700 text-right font-bold text-rose-500">
                       {acc.expense > 0 ? `-₹${acc.expense.toLocaleString()}` : '-'}
@@ -2939,6 +3155,33 @@ function AccountsManagement({ accounts, isAdmin }: { accounts: AccountEntry[], i
                   placeholder="e.g., KSEB Bill, Maintenance, etc."
                   className="w-full px-4 py-3 bg-neutral-800 border border-neutral-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100 placeholder:text-neutral-600"
                 />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-neutral-500 uppercase mb-2">For Month</label>
+                  <select 
+                    value={newEntry.forMonth}
+                    onChange={(e) => setNewEntry({ ...newEntry, forMonth: e.target.value })}
+                    className="w-full px-4 py-3 bg-neutral-800 border border-neutral-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100"
+                  >
+                    <option value="">None</option>
+                    {MONTHS.map(m => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-neutral-500 uppercase mb-2">For Year</label>
+                  <select 
+                    value={newEntry.forYear}
+                    onChange={(e) => setNewEntry({ ...newEntry, forYear: Number(e.target.value) })}
+                    className="w-full px-4 py-3 bg-neutral-800 border border-neutral-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100"
+                  >
+                    {[2024, 2025, 2026, 2027].map(y => (
+                      <option key={y} value={y}>{y}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
