@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">WhitePalace</string>
+    <string name="title_activity_main">WhitePalace</string>
+    <string name="package_name">com.whitepalace.app</string>
+    <string name="custom_url_scheme">com.whitepalace.app</string>
+</resources>

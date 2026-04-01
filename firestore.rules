@@ -13,7 +13,7 @@ service cloud.firestore {
     //   - displayName: string
     //   - photoURL: string
     //   - role: string (admin/owner)
-    //   - unitNumber: string
+    //   - flatNumber: string
     //   - createdAt: timestamp
     //
     // Collection: payments
@@ -21,7 +21,7 @@ service cloud.firestore {
     // Fields:
     //   - ownerUid: string (required)
     //   - ownerName: string
-    //   - unitNumber: string
+    //   - flatNumber: string
     //   - amount: number (required)
     //   - month: string (required)
     //   - status: string (pending/paid/failed)
@@ -107,6 +107,7 @@ service cloud.firestore {
       allow read: if isAuthenticated() && (isOwner(userId) || isAdmin());
       allow create: if isAuthenticated() && (isOwner(userId) || isAdmin()) && isValidUser(request.resource.data) && (request.resource.data.role == 'owner' || isAdmin());
       allow update: if isAuthenticated() && (isAdmin() || (isOwner(userId) && isValidUser(request.resource.data)));
+      allow delete: if isAdmin() && request.auth.uid != userId;
     }
 
     match /payments/{paymentId} {

@@ -15,6 +15,7 @@ import {
   collection, 
   doc, 
   getDoc, 
+  getDocs,
   setDoc, 
   onSnapshot, 
   query, 
@@ -57,10 +58,15 @@ import {
   Trash2,
   Edit2,
   Save,
-  X
+  X,
+  Search,
+  Download,
+  Check,
+  ChevronLeft
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
+import { Toaster, toast } from 'sonner';
 import { 
   BarChart, 
   Bar, 
@@ -139,6 +145,52 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   throw new Error(JSON.stringify(errInfo));
 }
 
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean, error: any }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: any) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: any, errorInfo: any) {
+    console.error("ErrorBoundary caught an error", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      let errorMessage = "Something went wrong.";
+      try {
+        const parsed = JSON.parse(this.state.error.message);
+        if (parsed.error) {
+          errorMessage = `Firestore Error: ${parsed.error} during ${parsed.operationType} on ${parsed.path}`;
+        }
+      } catch (e) {
+        errorMessage = this.state.error.message || String(this.state.error);
+      }
+
+      return (
+        <div className="min-h-screen bg-neutral-950 flex items-center justify-center p-6">
+          <div className="bg-neutral-900 border border-red-900/30 p-8 rounded-3xl max-w-md w-full text-center space-y-4">
+            <AlertCircle size={48} className="text-red-500 mx-auto" />
+            <h2 className="text-xl font-bold text-neutral-100">Application Error</h2>
+            <p className="text-neutral-400 text-sm">{errorMessage}</p>
+            <button 
+              onClick={() => window.location.reload()}
+              className="px-6 py-2 bg-neutral-800 text-neutral-100 rounded-xl hover:bg-neutral-700 transition-all"
+            >
+              Reload Application
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 const LoadingScreen = () => (
   <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center p-4">
     <motion.div 
@@ -280,7 +332,7 @@ function LegalSection({ onBack }: { onBack?: () => void }) {
       updated: "March 26, 2026",
       body: `Your privacy is important to us. This Privacy Policy explains how we collect, use, and protect your information:
 
-1. Information Collection: We collect information you provide directly to us, such as your name, email, unit number, and payment details.
+1. Information Collection: We collect information you provide directly to us, such as your name, email, flat number, and payment details.
 2. Use of Information: We use your information to manage apartment maintenance, process payments, and send important announcements.
 3. Data Security: We implement appropriate security measures to protect your personal information from unauthorized access or disclosure.
 4. Third-Party Services: We use third-party services like Firebase for data storage and Razorpay for payment processing. These services have their own privacy policies.
@@ -530,7 +582,7 @@ export default function App() {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'users' | 'payments' | 'announcements' | 'legal' | 'accounts'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'users' | 'announcements' | 'legal' | 'accounts' | 'ledger'>('dashboard');
   const [showLegalPublic, setShowLegalPublic] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
 
@@ -557,7 +609,7 @@ export default function App() {
             email: firebaseUser.email || '',
             displayName: firebaseUser.displayName || 'User',
             photoURL: firebaseUser.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(firebaseUser.displayName || 'User')}&background=random`,
-            role: isBootstrappedAdmin ? 'admin' : 'owner',
+            role: isBootstrappedAdmin ? 'superadmin' : 'owner',
             createdAt: serverTimestamp()
           };
           await setDoc(doc(db, 'users', firebaseUser.uid), newProfile);
@@ -597,7 +649,7 @@ export default function App() {
     let unsubPayments = () => {};
     let unsubUsers = () => {};
 
-    if (profile.role === 'admin') {
+    if (profile.role === 'admin' || profile.role === 'superadmin') {
       const qPayments = query(collection(db, 'payments'), orderBy('createdAt', 'desc'));
       unsubPayments = onSnapshot(qPayments, (snapshot) => {
         setPayments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PaymentRecord)));
@@ -607,10 +659,10 @@ export default function App() {
       unsubUsers = onSnapshot(qUsers, (snapshot) => {
         setAllUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as unknown as UserProfile)));
       });
-    } else {
+    } else if (profile.flatNumber) {
       const qPayments = query(
         collection(db, 'payments'), 
-        where('ownerUid', '==', profile.uid),
+        where('flatNumber', '==', profile.flatNumber),
         orderBy('createdAt', 'desc')
       );
       unsubPayments = onSnapshot(qPayments, (snapshot) => {
@@ -645,10 +697,14 @@ export default function App() {
     return <LandingPage onLogin={() => setShowLogin(true)} onShowLegal={() => setShowLegalPublic(true)} />;
   }
 
-  const isAdmin = profile.role === 'admin';
+  const isSuperAdmin = profile.role === 'superadmin' || profile.email === 'jkrsanskrit@gmail.com';
+  const isAdmin = profile.role === 'admin' || profile.role === 'superadmin' || profile.email === 'jkrsanskrit@gmail.com';
+  const isOwner = profile.role === 'owner';
 
   return (
-    <div className="min-h-screen bg-neutral-950 flex flex-col md:flex-row">
+    <ErrorBoundary>
+      <Toaster position="top-center" richColors />
+      <div className="min-h-screen bg-neutral-950 flex flex-col md:flex-row">
       {profile?.mustChangePassword && user && <PasswordChangeOverlay user={user} />}
       {/* Sidebar */}
       <aside className="w-full md:w-64 bg-neutral-900 border-b md:border-r border-neutral-800 p-4 flex flex-col gap-2">
@@ -677,26 +733,30 @@ export default function App() {
             />
           )}
           <SidebarItem 
-            active={activeTab === 'payments'} 
-            onClick={() => setActiveTab('payments')}
-            icon={<CreditCard size={20} />}
-            label="Payments"
-            activeColor="blue"
-          />
-          <SidebarItem 
             active={activeTab === 'announcements'} 
             onClick={() => setActiveTab('announcements')}
             icon={<Megaphone size={20} />}
             label="Announcements"
             activeColor="amber"
           />
-          <SidebarItem 
-            active={activeTab === 'accounts'} 
-            onClick={() => setActiveTab('accounts')}
-            icon={<Wallet size={20} />}
-            label="Accounts"
-            activeColor="rose"
-          />
+          {isAdmin && (
+            <SidebarItem 
+              active={activeTab === 'accounts'} 
+              onClick={() => setActiveTab('accounts')}
+              icon={<Wallet size={20} />}
+              label="Accounts"
+              activeColor="rose"
+            />
+          )}
+          {isAdmin && (
+            <SidebarItem 
+              active={activeTab === 'ledger'} 
+              onClick={() => setActiveTab('ledger')}
+              icon={<FileText size={20} />}
+              label="Payment Report"
+              activeColor="emerald"
+            />
+          )}
           <SidebarItem 
             active={activeTab === 'legal'} 
             onClick={() => setActiveTab('legal')}
@@ -710,13 +770,13 @@ export default function App() {
           <div className="px-4 py-3 bg-neutral-800/50 rounded-xl border border-neutral-800">
             <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest mb-1">Contact Us</p>
             <p className="text-xs font-semibold text-neutral-300">jkrsanskrit@gmail.com</p>
-            <p className="text-[10px] text-neutral-500">AptManager Support</p>
+            <p className="text-[10px] text-neutral-500">WhitePalace Support</p>
           </div>
           <div className="flex items-center gap-3 px-2">
             <img src={profile.photoURL} className="w-10 h-10 rounded-full border border-neutral-800" alt="Avatar" />
             <div className="flex flex-col min-w-0">
               <span className="text-sm font-semibold text-neutral-100 truncate">{profile.displayName}</span>
-              <span className="text-xs text-neutral-500 capitalize">{profile.role} {profile.unitNumber && `• ${profile.unitNumber}`}</span>
+              <span className="text-xs text-neutral-500 capitalize">{profile.role} {profile.flatNumber && `• ${profile.flatNumber}`}</span>
             </div>
           </div>
           <button 
@@ -731,6 +791,17 @@ export default function App() {
 
       {/* Main Content */}
       <main className="flex-1 p-4 md:p-8 overflow-y-auto max-h-screen bg-neutral-950">
+        <div className="mb-12 text-center">
+          <h1 className="text-4xl md:text-6xl font-black mb-2 tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 via-purple-400 to-blue-400 uppercase">
+            White Palace Appartment
+          </h1>
+          <div className="flex flex-col items-center gap-1">
+            <p className="text-neutral-400 font-medium tracking-wide">Mamppilly Lane, Eroor PO</p>
+            <p className="text-neutral-500 text-sm font-bold tracking-widest uppercase">Tripunithura-682306</p>
+          </div>
+          <div className="mt-6 h-1 w-24 bg-gradient-to-r from-indigo-500 to-blue-500 mx-auto rounded-full opacity-50" />
+        </div>
+
         <AnimatePresence mode="wait">
           {activeTab === 'dashboard' && (
             <motion.div 
@@ -748,8 +819,8 @@ export default function App() {
                 {!isAdmin && (
                   <div className="bg-neutral-900 px-6 py-3 rounded-2xl shadow-sm border border-neutral-800 flex items-center gap-4">
                     <div className="flex flex-col">
-                      <span className="text-xs text-neutral-500 uppercase tracking-wider font-bold">Unit Number</span>
-                      <span className="text-lg font-bold text-neutral-100">{profile.unitNumber || 'Not Assigned'}</span>
+                      <span className="text-xs text-neutral-500 uppercase tracking-wider font-bold">Flat Number</span>
+                      <span className="text-lg font-bold text-neutral-100">{profile.flatNumber || 'Not Assigned'}</span>
                     </div>
                   </div>
                 )}
@@ -761,7 +832,6 @@ export default function App() {
                 <OwnerDashboard 
                   stats={{ payments, announcements }} 
                   profile={profile} 
-                  onPayNow={() => setActiveTab('payments')} 
                 />
               )}
             </motion.div>
@@ -774,18 +844,7 @@ export default function App() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
             >
-              <UserManagement users={allUsers} />
-            </motion.div>
-          )}
-
-          {activeTab === 'payments' && (
-            <motion.div 
-              key="payments"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-            >
-              <PaymentManagement payments={payments} isAdmin={isAdmin} profile={profile} residents={allUsers} />
+              <UserManagement users={allUsers} currentUser={profile} isSuperAdmin={isSuperAdmin} />
             </motion.div>
           )}
 
@@ -796,18 +855,29 @@ export default function App() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
             >
-              <AnnouncementManagement announcements={announcements} isAdmin={isAdmin} profile={profile} />
+              <AnnouncementManagement announcements={announcements} isAdmin={isAdmin} isSuperAdmin={isSuperAdmin} profile={profile} />
             </motion.div>
           )}
 
-          {activeTab === 'accounts' && (
+          {activeTab === 'accounts' && isAdmin && (
             <motion.div 
               key="accounts"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
             >
-              <AccountsManagement accounts={accounts} isAdmin={isAdmin} />
+              <AccountsManagement accounts={accounts} isAdmin={isAdmin} isSuperAdmin={isSuperAdmin} />
+            </motion.div>
+          )}
+
+          {activeTab === 'ledger' && isAdmin && (
+            <motion.div 
+              key="ledger"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+            >
+              <PaymentReport accounts={accounts} payments={payments} residents={allUsers} />
             </motion.div>
           )}
 
@@ -824,6 +894,7 @@ export default function App() {
         </AnimatePresence>
       </main>
     </div>
+    </ErrorBoundary>
   );
 }
 
@@ -955,7 +1026,7 @@ function AdminDashboard({ stats }: { stats: { users: UserProfile[], payments: Pa
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-bold text-neutral-100 truncate">{payment.ownerName}</p>
-                <p className="text-[11px] font-medium text-neutral-500 uppercase tracking-tight">Unit {payment.unitNumber} • ₹{payment.amount}</p>
+                <p className="text-[11px] font-medium text-neutral-500 uppercase tracking-tight">Flat {payment.flatNumber} • ₹{payment.amount}</p>
               </div>
               <span className="text-[10px] font-black text-neutral-600 uppercase">{format(payment.createdAt?.toDate() || new Date(), 'MMM d')}</span>
             </div>
@@ -966,7 +1037,7 @@ function AdminDashboard({ stats }: { stats: { users: UserProfile[], payments: Pa
   );
 }
 
-function OwnerDashboard({ stats, profile, onPayNow }: { stats: { payments: PaymentRecord[], announcements: Announcement[] }, profile: UserProfile, onPayNow: () => void }) {
+function OwnerDashboard({ stats, profile }: { stats: { payments: PaymentRecord[], announcements: Announcement[] }, profile: UserProfile }) {
   const pendingPayments = stats.payments.filter(p => p.status === 'pending' || p.status === 'verifying');
   const totalPaid = stats.payments.filter(p => p.status === 'paid').reduce((acc, p) => acc + p.amount, 0);
 
@@ -982,21 +1053,8 @@ function OwnerDashboard({ stats, profile, onPayNow }: { stats: { payments: Payme
               <div>
                 <h3 className="text-lg font-bold text-orange-100">Pending Maintenance</h3>
                 <p className="text-orange-400/80">You have {pendingPayments.length} pending payment{pendingPayments.length > 1 ? 's' : ''}.</p>
+                <p className="text-xs text-orange-500/60 mt-1 italic">Please share your payment receipt in the WhatsApp group for verification.</p>
               </div>
-            </div>
-            <div className="flex flex-col items-end gap-2">
-              <button 
-                onClick={onPayNow}
-                className="px-6 py-3 bg-orange-600 text-white rounded-xl font-bold hover:bg-orange-700 transition-colors shadow-lg shadow-orange-900/20"
-              >
-                Pay Now
-              </button>
-              <button 
-                onClick={onPayNow}
-                className="text-xs font-bold text-orange-400 hover:text-orange-300 underline"
-              >
-                Already paid? Submit proof
-              </button>
             </div>
           </div>
         ) : (
@@ -1086,66 +1144,108 @@ function QuickMaintenanceForm({ onClose, onSuccess }: { onClose: () => void, onS
   const [amount, setAmount] = useState(1200);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [owners, setOwners] = useState<any[]>([]);
+  const [loadingResidents, setLoadingResidents] = useState(true);
 
-  const getPreviousMonth = (d: Date) => {
-    const prev = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+  const getCurrentMonth = (d: Date) => {
+    const prevDate = new Date(d.getFullYear(), d.getMonth() - 1, 1);
     return {
-      month: MONTHS[prev.getMonth()],
-      year: prev.getFullYear()
+      month: MONTHS[prevDate.getMonth()],
+      year: prevDate.getFullYear()
     };
   };
 
-  const initialOwners = [
-    { unit: 'A1', name: 'Renjini' },
-    { unit: 'A2', name: 'Deepu' },
-    { unit: 'A3', name: 'Sudha Subramaniyan' },
-    { unit: 'B1', name: 'Anila Kuruvilla' },
-    { unit: 'B2', name: 'Suresh' },
-    { unit: 'B3', name: 'Prathap PV' },
-    { unit: 'C1', name: 'Jayalakshmi' },
-    { unit: 'C2', name: 'Sindhu' },
-    { unit: 'C3', name: 'Jayan KR' },
-    { unit: 'D2', name: 'Usha G Menon' },
-    { unit: 'D3', name: 'Prem Narayanan' },
-    { unit: 'E2', name: 'Balachandran' },
-    { unit: 'E3', name: 'Vidyashekhar' },
-    { unit: 'F1', name: 'MohanaKrishnan' },
-    { unit: 'F2', name: 'Sudha Dinaker' },
-    { unit: 'F3', name: 'Seema Sreekumar' }
-  ].map(o => {
-    const prev = getPreviousMonth(new Date());
-    return { 
-      ...o, 
-      selected: false, 
-      customAmount: 1200, 
-      date: new Date(), 
-      months: 1,
-      forMonth: prev.month,
-      forYear: prev.year
+  useEffect(() => {
+    const fetchResidents = async () => {
+      setLoadingResidents(true);
+      try {
+        const q = query(collection(db, 'users'), where('role', '==', 'owner'));
+        const snapshot = await getDocs(q);
+        const current = getCurrentMonth(date);
+        const residents = snapshot.docs.map(doc => ({
+          uid: doc.id,
+          flatNumber: doc.data().flatNumber || doc.data().unitNumber || '?',
+          displayName: doc.data().displayName || 'Unknown',
+          selected: false,
+          customAmount: 1200,
+          date: date,
+          months: 1,
+          forMonth: current.month,
+          forYear: current.year
+        }));
+        
+        if (residents.length > 0) {
+          setOwners(residents.sort((a, b) => a.flatNumber.localeCompare(b.flatNumber)));
+        } else {
+          // Fallback if no residents found in system yet
+          const fallback = [
+            { flatNumber: 'A1', displayName: 'Renjini' },
+            { flatNumber: 'A2', displayName: 'Deepu' },
+            { flatNumber: 'A3', displayName: 'Sudha Subramaniyan' },
+            { flatNumber: 'B1', displayName: 'Anila Kuruvilla' },
+            { flatNumber: 'B2', displayName: 'Suresh' },
+            { flatNumber: 'B3', displayName: 'Prathap PV' },
+            { flatNumber: 'C1', displayName: 'Jayalakshmi' },
+            { flatNumber: 'C2', displayName: 'Sindhu' },
+            { flatNumber: 'C3', displayName: 'Jayan KR' },
+            { flatNumber: 'D2', displayName: 'Usha G Menon' },
+            { flatNumber: 'D3', displayName: 'Prem Narayanan' },
+            { flatNumber: 'E2', displayName: 'Balachandran' },
+            { flatNumber: 'E3', displayName: 'Vidyashekhar' },
+            { flatNumber: 'F1', displayName: 'MohanaKrishnan' },
+            { flatNumber: 'F2', displayName: 'Sudha Dinaker' },
+            { flatNumber: 'F3', displayName: 'Seema Sreekumar' }
+          ].map(o => ({
+            ...o,
+            uid: '',
+            selected: false,
+            customAmount: 1200,
+            date: new Date(),
+            months: 1,
+            forMonth: current.month,
+            forYear: current.year
+          }));
+          setOwners(fallback);
+        }
+      } catch (err) {
+        console.error("Error fetching residents:", err);
+        toast.error("Failed to load residents.");
+      } finally {
+        setLoadingResidents(false);
+      }
     };
-  });
 
-  const [owners, setOwners] = useState(initialOwners);
+    fetchResidents();
+  }, []);
 
-  const handleSyncFromResidents = () => {
-    onSnapshot(query(collection(db, 'users'), where('role', '==', 'owner')), (snapshot) => {
-      const prev = getPreviousMonth(date);
+  const handleSyncFromResidents = async () => {
+    setLoadingResidents(true);
+    try {
+      const q = query(collection(db, 'users'), where('role', '==', 'owner'));
+      const snapshot = await getDocs(q);
+      const current = getCurrentMonth(date);
       const residents = snapshot.docs.map(doc => ({
-        unit: doc.data().unitNumber || '?',
-        name: doc.data().displayName || 'Unknown',
+        uid: doc.id,
+        flatNumber: doc.data().flatNumber || doc.data().unitNumber || '?',
+        displayName: doc.data().displayName || 'Unknown',
         selected: false,
         customAmount: 1200,
         date: date,
         months: 1,
-        forMonth: prev.month,
-        forYear: prev.year
+        forMonth: current.month,
+        forYear: current.year
       }));
       if (residents.length > 0) {
-        setOwners(residents);
+        setOwners(residents.sort((a, b) => a.flatNumber.localeCompare(b.flatNumber)));
+        toast.success("Resident list updated.");
       } else {
-        alert("No residents found in User Management. Using default list.");
+        toast.error("No residents found in system.");
       }
-    });
+    } catch (err) {
+      toast.error("Failed to sync residents.");
+    } finally {
+      setLoadingResidents(false);
+    }
   };
 
   const handlePost = async () => {
@@ -1182,7 +1282,7 @@ function QuickMaintenanceForm({ onClose, onSuccess }: { onClose: () => void, onS
           description = `${endForMonth} ${endForYear}`;
         }
 
-        const particulars = `${owner.unit} ${owner.name} (${description})`;
+        const particulars = `${owner.flatNumber} ${owner.displayName} (${description})`;
 
         await addDoc(collection(db, 'accounts'), {
           date: Timestamp.fromDate(paymentDate),
@@ -1197,18 +1297,42 @@ function QuickMaintenanceForm({ onClose, onSuccess }: { onClose: () => void, onS
           createdAt: serverTimestamp()
         });
 
-        // 2. Create shadow entries for future months (Advance Allocation)
+        // 2. Create/Update PaymentRecord in 'payments' collection for resident dashboard
         for (let i = 0; i < owner.months; i++) {
           const currentForDate = new Date(owner.forYear, startMonthIdx + i, 1);
+          const currentForMonth = MONTHS[currentForDate.getMonth()];
+          const currentForYear = currentForDate.getFullYear();
+          const monthKey = `${currentForYear}-${String(currentForDate.getMonth() + 1).padStart(2, '0')}`;
+
+          // Check if a payment record already exists for this month/flat
+          const q = query(
+            collection(db, 'payments'), 
+            where('ownerUid', '==', owner.uid),
+            where('month', '==', monthKey)
+          );
           
+          // We can't use getDocs easily here without await, so we'll just add a new one or use a specific ID
+          // To avoid duplicates, let's use a deterministic ID: ownerUid_monthKey
+          const paymentId = `${owner.uid}_${monthKey}`;
+          await setDoc(doc(db, 'payments', paymentId), {
+            ownerUid: owner.uid,
+            ownerName: owner.displayName,
+            flatNumber: owner.flatNumber,
+            amount: monthlyAmount,
+            month: monthKey,
+            status: 'paid',
+            paidAt: serverTimestamp(),
+            createdAt: serverTimestamp(),
+            transactionId: `MANUAL_${Date.now()}`,
+            particulars: `Manual Entry: ${particulars}`
+          }, { merge: true });
+
+          // 3. Create shadow entries for future months (Advance Allocation) in 'accounts'
           // Only create shadow entries for months AFTER the payment month
           if (currentForDate > paymentMonthYear) {
-            const currentForMonth = MONTHS[currentForDate.getMonth()];
-            const currentForYear = currentForDate.getFullYear();
-            
             await addDoc(collection(db, 'accounts'), {
               date: null, // No date for shadow entries
-              particulars: `${owner.unit} ${owner.name} (From advance payment of ${MONTHS[paymentDate.getMonth()]})`,
+              particulars: `${owner.flatNumber} ${owner.displayName} (From advance payment of ${MONTHS[paymentDate.getMonth()]})`,
               income: 0, // Doesn't affect balance
               displayAmount: monthlyAmount, // For UI display
               expense: 0,
@@ -1234,62 +1358,6 @@ function QuickMaintenanceForm({ onClose, onSuccess }: { onClose: () => void, onS
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-neutral-800/30 p-4 rounded-2xl border border-neutral-700">
-        <div>
-          <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-2">Bulk Payment Date</label>
-          <input 
-            type="date" 
-            value={format(date, 'yyyy-MM-dd')}
-            onChange={(e) => {
-              const newDate = new Date(e.target.value);
-              setDate(newDate);
-              setOwners(owners.map(o => ({ ...o, date: newDate })));
-            }}
-            className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100 text-sm"
-          />
-        </div>
-        <div>
-          <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-2">Bulk For Month/Year</label>
-          <div className="grid grid-cols-2 gap-2">
-            <select 
-              value={owners[0]?.forMonth || MONTHS[new Date().getMonth()]}
-              onChange={(e) => {
-                const val = e.target.value;
-                setOwners(owners.map(o => ({ ...o, forMonth: val })));
-              }}
-              className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100 text-sm"
-            >
-              {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
-            </select>
-            <input 
-              type="number" 
-              value={owners[0]?.forYear || new Date().getFullYear()}
-              onChange={(e) => {
-                const val = Number(e.target.value);
-                setOwners(owners.map(o => ({ ...o, forYear: val })));
-              }}
-              className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100 text-sm"
-            />
-          </div>
-        </div>
-        <div>
-          <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-2">Bulk Amount</label>
-          <div className="relative">
-            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-500 font-bold text-sm">₹</span>
-            <input 
-              type="number" 
-              value={amount}
-              onChange={(e) => {
-                const val = Number(e.target.value);
-                setAmount(val);
-                setOwners(owners.map(o => ({ ...o, customAmount: val * o.months })));
-              }}
-              className="w-full pl-8 pr-4 py-2 bg-neutral-800 border border-neutral-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100 text-sm"
-            />
-          </div>
-        </div>
-      </div>
-
       <div className="flex items-center justify-between">
         <h4 className="text-sm font-bold text-neutral-400 uppercase tracking-widest">Resident List</h4>
         <button 
@@ -1302,7 +1370,12 @@ function QuickMaintenanceForm({ onClose, onSuccess }: { onClose: () => void, onS
       </div>
 
       <div className="space-y-2 max-h-80 overflow-y-auto pr-2 no-scrollbar">
-        {owners.map((owner, idx) => (
+        {loadingResidents ? (
+          <div className="flex flex-col items-center justify-center py-12 gap-3">
+            <RefreshCw className="text-indigo-500 animate-spin" size={24} />
+            <p className="text-sm text-neutral-500 font-medium">Loading residents...</p>
+          </div>
+        ) : owners.map((owner, idx) => (
           <div key={idx} className={cn(
             "p-3 rounded-2xl border transition-all flex flex-col md:flex-row md:items-center gap-4",
             owner.selected ? "bg-indigo-900/10 border-indigo-500/20" : "bg-neutral-800/30 border-neutral-700 opacity-40"
@@ -1318,7 +1391,7 @@ function QuickMaintenanceForm({ onClose, onSuccess }: { onClose: () => void, onS
                 }}
                 className="w-5 h-5 rounded-lg bg-neutral-700 border-neutral-600 text-indigo-600 focus:ring-indigo-500"
               />
-              <p className="text-sm font-bold text-neutral-100 truncate">{owner.unit} {owner.name}</p>
+              <p className="text-sm font-bold text-neutral-100 truncate">{owner.flatNumber} {owner.displayName}</p>
             </div>
             
             <div className="flex-1 grid grid-cols-4 gap-2">
@@ -1455,19 +1528,43 @@ function StatCard({ label, value, icon, color }: { label: string, value: string,
   );
 }
 
-function UserManagement({ users }: { users: UserProfile[] }) {
+function UserManagement({ users, currentUser, isSuperAdmin }: { users: UserProfile[], currentUser: UserProfile, isSuperAdmin: boolean }) {
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
-  const [unitNumber, setUnitNumber] = useState('');
+  const [flatNumber, setFlatNumber] = useState('');
   const [copying, setCopying] = useState(false);
   
   // Create User Form State
   const [showCreate, setShowCreate] = useState(false);
   const [newEmail, setNewEmail] = useState('');
   const [newName, setNewName] = useState('');
-  const [newUnit, setNewUnit] = useState('');
+  const [newFlat, setNewFlat] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [newRole, setNewRole] = useState<UserRole>('owner');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
+  const [deletingUser, setDeletingUser] = useState<UserProfile | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [confirmingRoleChange, setConfirmingRoleChange] = useState<{ user: UserProfile, newRole: UserRole } | null>(null);
+
+  const handleDeleteUser = async () => {
+    if (!deletingUser) return;
+    if (deletingUser.uid === currentUser.uid) {
+      setDeletingUser(null);
+      return;
+    }
+    
+    setIsDeleting(true);
+    try {
+      console.log(`Attempting to delete user: ${deletingUser.uid}`);
+      await deleteDoc(doc(db, 'users', deletingUser.uid));
+      setDeletingUser(null);
+    } catch (error) {
+      console.error("Delete failed:", error);
+      handleFirestoreError(error, OperationType.DELETE, `users/${deletingUser.uid}`);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const handleCreateResident = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1488,8 +1585,8 @@ function UserManagement({ users }: { users: UserProfile[] }) {
         email: newEmail,
         displayName: newName,
         photoURL: `https://ui-avatars.com/api/?name=${encodeURIComponent(newName)}&background=random`,
-        role: 'owner',
-        unitNumber: newUnit,
+        role: newRole,
+        flatNumber: newFlat,
         createdAt: serverTimestamp(),
         mustChangePassword: true
       });
@@ -1500,9 +1597,10 @@ function UserManagement({ users }: { users: UserProfile[] }) {
       setShowCreate(false);
       setNewEmail('');
       setNewName('');
-      setNewUnit('');
+      setNewFlat('');
       setNewPassword('');
-      alert('Resident created successfully! They can now log in with the credentials you provided.');
+      setNewRole('owner');
+      toast.success('Resident created successfully! They can now log in with the credentials you provided.');
     } catch (err: any) {
       setCreateError(err.message || 'Failed to create resident');
     } finally {
@@ -1513,20 +1611,32 @@ function UserManagement({ users }: { users: UserProfile[] }) {
   const handleUpdateUser = async (uid: string, currentRole: UserRole) => {
     try {
       await updateDoc(doc(db, 'users', uid), { 
-        unitNumber,
+        flatNumber: flatNumber,
         role: currentRole // Keep role for now, or add role select if needed
       });
       setEditingUser(null);
-      setUnitNumber('');
+      setFlatNumber('');
     } catch (error) {
       console.error("Update failed:", error);
     }
   };
 
-  const toggleRole = async (user: UserProfile) => {
+  const toggleRole = (user: UserProfile) => {
     const newRole = user.role === 'admin' ? 'owner' : 'admin';
-    if (window.confirm(`Change ${user.displayName}'s role to ${newRole}?`)) {
+    setConfirmingRoleChange({ user, newRole });
+  };
+
+  const handleConfirmRoleChange = async () => {
+    if (!confirmingRoleChange) return;
+    const { user, newRole } = confirmingRoleChange;
+    try {
       await updateDoc(doc(db, 'users', user.uid), { role: newRole });
+      toast.success(`Role updated for ${user.displayName}`);
+    } catch (error) {
+      console.error("Role update failed:", error);
+      toast.error("Failed to update role");
+    } finally {
+      setConfirmingRoleChange(null);
     }
   };
 
@@ -1541,34 +1651,50 @@ function UserManagement({ users }: { users: UserProfile[] }) {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-neutral-100">Resident Management</h2>
-          <p className="text-sm text-neutral-500">Manage unit assignments and roles for all residents.</p>
+          <p className="text-sm text-neutral-500">Manage flat assignments and roles for all residents.</p>
         </div>
         
-        <div className="flex items-center gap-3">
-          <button 
-            onClick={() => setShowCreate(true)}
-            className="px-6 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-2xl font-bold flex items-center gap-2 hover:from-emerald-700 hover:to-teal-700 transition-all shadow-lg shadow-emerald-900/20"
-          >
-            <Plus size={20} />
-            Create Resident
-          </button>
-          
-          <div className="bg-neutral-900 p-4 rounded-2xl border border-neutral-800 shadow-sm flex items-center gap-4">
-            <div className="flex flex-col">
-              <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">Invite Residents</span>
-              <span className="text-xs font-mono text-neutral-400 truncate max-w-[150px]">{window.location.origin}</span>
-            </div>
+        {isSuperAdmin && (
+          <div className="flex items-center gap-3">
             <button 
-              onClick={copyLink}
-              className={cn(
-                "px-4 py-2 rounded-xl text-xs font-bold transition-all",
-                copying ? "bg-green-900/30 text-green-400" : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
-              )}
+              onClick={() => setShowCreate(true)}
+              className="px-6 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-2xl font-bold flex items-center gap-2 hover:from-emerald-700 hover:to-teal-700 transition-all shadow-lg shadow-emerald-900/20"
             >
-              {copying ? "Copied!" : "Copy Link"}
+              <Plus size={20} />
+              Create Resident
             </button>
+
+            <button 
+              onClick={() => {
+                toast.promise(new Promise(resolve => setTimeout(resolve, 800)), {
+                  loading: 'Syncing residents...',
+                  success: 'Resident list synced successfully',
+                  error: 'Failed to sync residents',
+                });
+              }}
+              className="px-4 py-3 bg-neutral-800 text-neutral-300 rounded-2xl font-bold flex items-center gap-2 hover:bg-neutral-700 transition-all border border-neutral-700"
+            >
+              <RefreshCw size={18} />
+              Sync Residents
+            </button>
+            
+            <div className="bg-neutral-900 p-4 rounded-2xl border border-neutral-800 shadow-sm flex items-center gap-4">
+              <div className="flex flex-col">
+                <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">Invite Residents</span>
+                <span className="text-xs font-mono text-neutral-400 truncate max-w-[150px]">{window.location.origin}</span>
+              </div>
+              <button 
+                onClick={copyLink}
+                className={cn(
+                  "px-4 py-2 rounded-xl text-xs font-bold transition-all",
+                  copying ? "bg-green-900/30 text-green-400" : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
+                )}
+              >
+                {copying ? "Copied!" : "Copy Link"}
+              </button>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       <AnimatePresence>
@@ -1615,12 +1741,12 @@ function UserManagement({ users }: { users: UserProfile[] }) {
                 
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-xs font-bold text-neutral-500 uppercase mb-2">Unit Number</label>
+                    <label className="block text-xs font-bold text-neutral-500 uppercase mb-2">Flat Number</label>
                     <input 
                       type="text" 
                       required
-                      value={newUnit}
-                      onChange={(e) => setNewUnit(e.target.value)}
+                      value={newFlat}
+                      onChange={(e) => setNewFlat(e.target.value)}
                       className="w-full px-4 py-3 bg-neutral-800 border border-neutral-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100 placeholder:text-neutral-600"
                       placeholder="A-101"
                     />
@@ -1635,6 +1761,17 @@ function UserManagement({ users }: { users: UserProfile[] }) {
                       className="w-full px-4 py-3 bg-neutral-800 border border-neutral-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100 placeholder:text-neutral-600"
                       placeholder="Set a temporary password"
                     />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-neutral-500 uppercase mb-2">Account Role</label>
+                    <select 
+                      value={newRole}
+                      onChange={(e) => setNewRole(e.target.value as UserRole)}
+                      className="w-full px-4 py-3 bg-neutral-800 border border-neutral-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100"
+                    >
+                      <option value="owner">Owner (Resident)</option>
+                      <option value="admin">Admin (Staff)</option>
+                    </select>
                   </div>
                 </div>
 
@@ -1668,7 +1805,7 @@ function UserManagement({ users }: { users: UserProfile[] }) {
           <thead>
             <tr className="bg-neutral-800/50 border-b border-neutral-800">
               <th className="px-6 py-4 text-xs font-bold text-neutral-500 uppercase tracking-wider">Resident</th>
-              <th className="px-6 py-4 text-xs font-bold text-neutral-500 uppercase tracking-wider">Unit</th>
+              <th className="px-6 py-4 text-xs font-bold text-neutral-500 uppercase tracking-wider">Flat</th>
               <th className="px-6 py-4 text-xs font-bold text-neutral-500 uppercase tracking-wider">Role</th>
               <th className="px-6 py-4 text-xs font-bold text-neutral-500 uppercase tracking-wider text-right">Actions</th>
             </tr>
@@ -1689,47 +1826,64 @@ function UserManagement({ users }: { users: UserProfile[] }) {
                   {editingUser?.uid === user.uid ? (
                     <input 
                       type="text" 
-                      value={unitNumber} 
-                      onChange={(e) => setUnitNumber(e.target.value)}
-                      placeholder="Unit #"
+                      value={flatNumber} 
+                      onChange={(e) => setFlatNumber(e.target.value)}
+                      placeholder="Flat #"
                       className="w-24 px-3 py-1 bg-neutral-800 border-neutral-700 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100"
                     />
                   ) : (
                     <span className={cn(
                       "font-medium",
-                      user.unitNumber ? "text-neutral-300" : "text-red-400 italic text-sm"
+                      user.flatNumber ? "text-neutral-300" : "text-red-400 italic text-sm"
                     )}>
-                      {user.unitNumber || 'Unassigned'}
+                      {user.flatNumber || 'Unassigned'}
                     </span>
                   )}
                 </td>
                 <td className="px-6 py-4">
                     <button 
-                      onClick={() => toggleRole(user)}
+                      onClick={() => isSuperAdmin && toggleRole(user)}
+                      disabled={!isSuperAdmin}
                       className={cn(
-                        "text-[10px] font-bold uppercase px-2 py-1 rounded-md transition-all hover:opacity-80",
-                        user.role === 'admin' ? "bg-indigo-900/30 text-indigo-400 border border-indigo-900/50" : "bg-neutral-800 text-neutral-400 border border-neutral-700"
+                        "text-[10px] font-bold uppercase px-2 py-1 rounded-md transition-all",
+                        isSuperAdmin ? "hover:opacity-80 cursor-pointer" : "cursor-default",
+                        user.role === 'superadmin' ? "bg-amber-900/30 text-amber-400 border border-amber-900/50" :
+                        user.role === 'admin' ? "bg-indigo-900/30 text-indigo-400 border border-indigo-900/50" : 
+                        "bg-neutral-800 text-neutral-400 border border-neutral-700"
                       )}
                     >
                       {user.role}
                     </button>
                 </td>
                 <td className="px-6 py-4 text-right">
-                  {editingUser?.uid === user.uid ? (
-                    <div className="flex items-center justify-end gap-2">
-                      <button onClick={() => handleUpdateUser(user.uid, user.role)} className="text-emerald-400 hover:text-emerald-300 font-bold text-sm">Save</button>
-                      <button onClick={() => setEditingUser(null)} className="text-neutral-500 hover:text-neutral-400 font-bold text-sm">Cancel</button>
-                    </div>
-                  ) : (
-                    <button 
-                      onClick={() => {
-                        setEditingUser(user);
-                        setUnitNumber(user.unitNumber || '');
-                      }} 
-                      className="text-neutral-500 hover:text-neutral-100 transition-colors font-medium text-sm"
-                    >
-                      Edit Unit
-                    </button>
+                  {isSuperAdmin && (
+                    editingUser?.uid === user.uid ? (
+                      <div className="flex items-center justify-end gap-2">
+                        <button onClick={() => handleUpdateUser(user.uid, user.role)} className="text-emerald-400 hover:text-emerald-300 font-bold text-sm">Save</button>
+                        <button onClick={() => setEditingUser(null)} className="text-neutral-500 hover:text-neutral-400 font-bold text-sm">Cancel</button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-end gap-4">
+                        <button 
+                          onClick={() => {
+                            setEditingUser(user);
+                            setFlatNumber(user.flatNumber || '');
+                          }} 
+                          className="text-neutral-500 hover:text-neutral-100 transition-colors font-medium text-sm"
+                        >
+                          Edit Flat
+                        </button>
+                        {user.uid !== currentUser.uid && (
+                          <button 
+                            onClick={() => setDeletingUser(user)}
+                            className="text-neutral-500 hover:text-red-400 transition-all p-2 hover:bg-red-900/20 rounded-lg group"
+                            title="Delete Resident"
+                          >
+                            <Trash2 size={16} className="group-hover:scale-110 transition-transform" />
+                          </button>
+                        )}
+                      </div>
+                    )
                   )}
                 </td>
               </tr>
@@ -1737,674 +1891,90 @@ function UserManagement({ users }: { users: UserProfile[] }) {
           </tbody>
         </table>
       </div>
-    </div>
-  );
-}
 
-function PaymentManagement({ payments, isAdmin, profile, residents }: { payments: PaymentRecord[], isAdmin: boolean, profile: UserProfile, residents: UserProfile[] }) {
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [showProofModal, setShowProofModal] = useState(false);
-  const [selectedPayment, setSelectedPayment] = useState<PaymentRecord | null>(null);
-  const [transactionId, setTransactionId] = useState('');
-  const [screenshot, setScreenshot] = useState<string | null>(null);
-  const [amount, setAmount] = useState('1200');
-  const [month, setMonth] = useState(format(new Date(), 'yyyy-MM'));
-  const [targetUnit, setTargetUnit] = useState('all');
-
-  const BANK_DETAILS = {
-    account: '7922646832',
-    ifsc: 'IDIB000T171',
-    name: 'Mrs SINDHU JAYAN',
-    upiId: 'sindhujayanc3@oksbi',
-    phone: '917012128339' // Corrected WhatsApp number
-  };
-
-  const handleGeneratePayments = async () => {
-    try {
-      const targets = targetUnit === 'all' ? residents.filter(r => r.role === 'owner') : residents.filter(r => r.unitNumber === targetUnit);
-      
-      for (const res of targets) {
-        await addDoc(collection(db, 'payments'), {
-          ownerUid: res.uid,
-          ownerName: res.displayName,
-          unitNumber: res.unitNumber || 'N/A',
-          amount: Number(amount),
-          month,
-          status: 'pending',
-          createdAt: serverTimestamp()
-        });
-      }
-      setShowAddModal(false);
-    } catch (error) {
-      console.error("Generation failed:", error);
-    }
-  };
-
-  const handleApprovePayment = async (paymentId: string) => {
-    try {
-      await updateDoc(doc(db, 'payments', paymentId), {
-        status: 'paid',
-        verified: true,
-        verifiedAt: serverTimestamp()
-      });
-    } catch (error) {
-      console.error("Approval failed:", error);
-    }
-  };
-
-  const handleRejectPayment = async (paymentId: string) => {
-    if (window.confirm("Reject this payment? The resident will need to submit proof again.")) {
-      try {
-        await updateDoc(doc(db, 'payments', paymentId), {
-          status: 'pending',
-          transactionId: null,
-          proofImage: null,
-          verified: false
-        });
-      } catch (error) {
-        console.error("Rejection failed:", error);
-      }
-    }
-  };
-
-  const handlePayClick = (payment: PaymentRecord) => {
-    setSelectedPayment(payment);
-    setShowPaymentModal(true);
-  };
-
-  const confirmPayment = async (method: 'upload' | 'whatsapp') => {
-    if (!selectedPayment) return;
-    
-    if (method === 'upload' && !screenshot) {
-      alert('Please upload a screenshot first.');
-      return;
-    }
-
-    try {
-      await updateDoc(doc(db, 'payments', selectedPayment.id), {
-        status: 'verifying',
-        paidAt: serverTimestamp(),
-        paymentMethod: method === 'whatsapp' ? 'WhatsApp Verification' : 'Direct Upload',
-        proofImage: screenshot || null,
-        verified: false,
-        verificationNote: method === 'whatsapp' ? 'Resident sent receipt via WhatsApp' : 'Resident uploaded screenshot'
-      });
-      setShowProofModal(false);
-      setShowPaymentModal(false);
-      setSelectedPayment(null);
-      setScreenshot(null);
-    } catch (error) {
-      console.error("Payment confirmation failed:", error);
-    }
-  };
-
-  const sendWhatsAppReceipt = () => {
-    if (!selectedPayment) return;
-    const message = `Hi, I have completed the maintenance payment of ₹${selectedPayment.amount} for Unit ${selectedPayment.unitNumber} (${selectedPayment.month}). Attaching the receipt below.`;
-    window.open(`https://wa.me/${BANK_DETAILS.phone}?text=${encodeURIComponent(message)}`, '_blank');
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setScreenshot(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const getUpiUrl = (payment: PaymentRecord) => {
-    const ref = `APT-${payment.unitNumber}-${payment.month.replace('-', '')}`.toUpperCase();
-    return `upi://pay?pa=${BANK_DETAILS.upiId}&pn=${encodeURIComponent(BANK_DETAILS.name)}&am=${payment.amount}&cu=INR&tn=${encodeURIComponent(ref)}`;
-  };
-
-  const getReferenceNote = (payment: PaymentRecord) => {
-    return `APT-${payment.unitNumber}-${payment.month.replace('-', '')}`.toUpperCase();
-  };
-
-  const handlePaytmPayment = async (payment: PaymentRecord) => {
-    try {
-      const initiatePaytm = httpsCallable(functions, 'initiatePaytmPayment');
-      const result = await initiatePaytm({
-        paymentId: payment.id,
-        amount: payment.amount
-      });
-
-      const { mid, orderId, checksum, txnAmount, callbackUrl } = result.data as any;
-
-      // Paytm requires a form submission to initiate the payment
-      const form = document.createElement('form');
-      form.method = 'POST';
-      form.action = `https://securegw-stage.paytm.in/theia/api/v1/initiateTransaction?mid=${mid}&orderId=${orderId}`;
-      form.name = 'paytmForm';
-
-      const params = {
-        mid,
-        orderId,
-        txnToken: checksum, // In newer APIs, this is the txnToken
-      };
-
-      // Note: For the standard redirection flow, you might need a different approach 
-      // depending on the Paytm SDK version. This is a simplified example.
-      // Most modern integrations use the JS Checkout or a direct POST.
-      
-      // For this example, we'll use a hidden form to POST to Paytm
-      const paytmUrl = `https://securegw-stage.paytm.in/order/process`;
-      form.action = paytmUrl;
-
-      const fields = {
-        MID: mid,
-        ORDER_ID: orderId,
-        TXN_AMOUNT: txnAmount,
-        CUST_ID: auth.currentUser?.uid || 'GUEST',
-        WEBSITE: 'WEBSTAGING',
-        CALLBACK_URL: callbackUrl,
-        CHECKSUMHASH: checksum,
-        INDUSTRY_TYPE_ID: 'Retail',
-        CHANNEL_ID: 'WEB'
-      };
-
-      Object.entries(fields).forEach(([key, value]) => {
-        const input = document.createElement('input');
-        input.type = 'hidden';
-        input.name = key;
-        input.value = value as string;
-        form.appendChild(input);
-      });
-
-      document.body.appendChild(form);
-      form.submit();
-    } catch (error: any) {
-      console.error('Paytm Initiation Error:', error);
-      alert('Failed to initiate Paytm payment. Please try again.');
-    }
-  };
-
-  const handleRazorpayPayment = async (payment: PaymentRecord) => {
-    try {
-      const response = await fetch('/api/razorpay/order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          amount: payment.amount,
-          currency: 'INR',
-          receipt: payment.id
-        })
-      });
-
-      if (!response.ok) throw new Error('Failed to create Razorpay order');
-      const order = await response.json();
-
-      const options = {
-        key: import.meta.env.VITE_RAZORPAY_KEY_ID,
-        amount: order.amount,
-        currency: order.currency,
-        name: "AptManager",
-        description: `Maintenance Payment - ${payment.month}`,
-        order_id: order.id,
-        handler: async function (response: any) {
-          try {
-            await updateDoc(doc(db, 'payments', payment.id), {
-              status: 'paid',
-              paidAt: serverTimestamp(),
-              paymentMethod: 'Razorpay',
-              transactionId: response.razorpay_payment_id,
-              razorpayOrderId: response.razorpay_order_id,
-              verified: true
-            });
-            alert('Payment Successful!');
-            setShowPaymentModal(false);
-          } catch (err) {
-            console.error('Failed to update payment status:', err);
-            alert('Payment was successful but failed to update app status. Please contact Admin.');
-          }
-        },
-        prefill: {
-          name: profile.displayName,
-          email: profile.email,
-        },
-        theme: {
-          color: "#171717"
-        }
-      };
-
-      const rzp = new window.Razorpay(options);
-      rzp.open();
-    } catch (error) {
-      console.error('Razorpay error:', error);
-      alert('Failed to initialize Razorpay. Please use UPI instead.');
-    }
-  };
-
-  const createTestPayment = async () => {
-    try {
-      const testId = `test-${Date.now()}`;
-      await setDoc(doc(db, 'payments', testId), {
-        id: testId,
-        ownerUid: profile.uid,
-        ownerName: profile.displayName || 'Test User',
-        unitNumber: profile.unitNumber || 'TEST-01',
-        amount: 1200,
-        month: format(new Date(), 'yyyy-MM'),
-        status: 'pending',
-        createdAt: serverTimestamp(),
-        isTest: true
-      });
-      alert('Test payment created! You can now see it in the list and test the "Pay Now" button.');
-    } catch (error) {
-      console.error("Failed to create test payment:", error);
-      alert('Failed to create test payment. Please check console.');
-    }
-  };
-
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <h2 className="text-2xl font-bold text-neutral-100">Maintenance Payments</h2>
-        <div className="flex flex-wrap items-center gap-3">
-          {isAdmin && (
-            <>
-              <button 
-                onClick={createTestPayment}
-                className="flex items-center gap-2 px-6 py-3 bg-blue-900/20 text-blue-400 rounded-2xl font-bold hover:bg-blue-900/30 transition-all border border-blue-800/50"
-              >
-                <CreditCard size={20} />
-                Create Test Payment
-              </button>
-              <button 
-                onClick={() => setShowAddModal(true)}
-                className="flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-500 transition-all shadow-lg shadow-indigo-900/20"
-              >
-                <Plus size={20} />
-                Generate Bills
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4">
-        {payments.map(payment => (
-          <div key={payment.id} className="bg-neutral-900 p-6 rounded-3xl border border-neutral-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
-            <div className="flex items-center gap-4">
-              <div className={cn(
-                "w-14 h-14 rounded-2xl flex items-center justify-center",
-                payment.status === 'paid' ? "bg-green-900/20 text-green-400" : 
-                payment.status === 'verifying' ? "bg-blue-900/20 text-blue-400" :
-                "bg-orange-900/20 text-orange-400"
-              )}>
-                <CreditCard size={28} />
-              </div>
-              <div>
-                <h3 className="text-lg font-bold text-neutral-100">
-                  {format(new Date(payment.month + '-01'), 'MMMM yyyy')}
-                </h3>
-                <p className="text-sm text-neutral-500">
-                  {isAdmin ? `Resident: ${payment.ownerName} (Unit ${payment.unitNumber})` : `Maintenance Charge for Unit ${payment.unitNumber}`}
-                </p>
-                {payment.status === 'verifying' && (
-                  <p className="text-xs font-bold text-blue-400 mt-1 flex items-center gap-1">
-                    <Clock size={12} /> Verification Pending
-                  </p>
-                )}
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between md:justify-end gap-8">
-              <div className="text-right">
-                <p className="text-2xl font-bold text-neutral-100">₹{payment.amount}</p>
-                <span className={cn(
-                  "text-[10px] font-bold uppercase px-2 py-1 rounded-md",
-                  payment.status === 'paid' ? "bg-green-900/30 text-green-400" : 
-                  payment.status === 'verifying' ? "bg-blue-900/30 text-blue-400" :
-                  "bg-orange-900/30 text-orange-400"
-                )}>
-                  {payment.status === 'verifying' ? 'Verifying' : payment.status}
-                </span>
-              </div>
-              
-              {(payment.status === 'pending' && (!isAdmin || payment.isTest)) && (
-                <div className="flex flex-col gap-2">
-                  <button 
-                    onClick={() => handlePayClick(payment)}
-                    className="px-8 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-500 transition-colors"
-                  >
-                    Pay Now
-                  </button>
-                  <button 
-                    onClick={() => {
-                      setSelectedPayment(payment);
-                      setShowProofModal(true);
-                    }}
-                    className="text-xs font-bold text-neutral-500 hover:text-neutral-400 underline"
-                  >
-                    Already paid? Submit proof
-                  </button>
-                </div>
-              )}
-
-              {isAdmin && payment.status === 'verifying' && (
-                <div className="flex items-center gap-2">
-                  <button 
-                    onClick={() => handleApprovePayment(payment.id)}
-                    className="px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold text-xs hover:bg-emerald-500 transition-all shadow-lg shadow-emerald-900/20"
-                  >
-                    Approve
-                  </button>
-                  <button 
-                    onClick={() => handleRejectPayment(payment.id)}
-                    className="px-4 py-2 bg-red-900/20 text-red-400 rounded-xl font-bold text-xs hover:bg-red-900/30 border border-red-800/50"
-                  >
-                    Reject
-                  </button>
-                </div>
-              )}
-
-              {(payment.status === 'paid' || payment.status === 'verifying') && (
-                <div className="hidden md:block text-right border-l border-neutral-800 pl-8">
-                  {payment.proofImage ? (
-                    <button 
-                      onClick={() => window.open(payment.proofImage!, '_blank')}
-                      className="flex flex-col items-end group"
-                    >
-                      <p className="text-[10px] font-bold text-neutral-500 uppercase group-hover:text-indigo-400 transition-colors">Payment Proof</p>
-                      <div className="w-12 h-12 bg-neutral-800 rounded-lg mt-1 overflow-hidden border border-neutral-700 group-hover:border-indigo-500/50 transition-all">
-                        <img src={payment.proofImage} className="w-full h-full object-cover" alt="Proof" />
-                      </div>
-                      <span className="text-[10px] text-indigo-400 underline font-bold mt-1">View Full Receipt</span>
-                    </button>
-                  ) : (
-                    <div className="text-right">
-                      <p className="text-[10px] font-bold text-neutral-500 uppercase">Transaction ID</p>
-                      <p className="text-xs font-mono text-neutral-400">{payment.transactionId || 'N/A'}</p>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-        {payments.length === 0 && (
-          <div className="text-center py-20 bg-neutral-900 rounded-3xl border border-dashed border-neutral-800">
-            <CreditCard className="mx-auto text-neutral-800 mb-4" size={48} />
-            <p className="text-neutral-500 font-medium">No payment records found.</p>
-          </div>
-        )}
-      </div>
-
-      {/* Payment Modal */}
-      {showPaymentModal && selectedPayment && (
-        <div className="fixed inset-0 bg-neutral-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-neutral-900 w-full max-w-md max-h-[90vh] overflow-y-auto p-8 rounded-3xl shadow-2xl border border-neutral-800"
-          >
-            <div className="flex justify-center mb-6">
-              <div className="w-16 h-16 bg-blue-900/20 rounded-2xl flex items-center justify-center text-blue-400">
-                <CreditCard size={32} />
-              </div>
-            </div>
-            <h3 className="text-2xl font-bold text-neutral-100 mb-2">Complete Payment</h3>
-            <p className="text-neutral-500 mb-6 text-sm">Scan the QR code or click the button to pay ₹{selectedPayment.amount} via UPI / Google Pay.</p>
-            
-            <div className="bg-neutral-800/50 p-6 rounded-2xl mb-6 flex flex-col items-center border border-neutral-800">
-              <img 
-                src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(getUpiUrl(selectedPayment))}`} 
-                alt="UPI QR Code"
-                className="w-48 h-48 mb-4 border-4 border-neutral-700 rounded-lg shadow-sm"
-              />
-              <div className="text-center">
-                <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest mb-1">Transaction Note</p>
-                <div className="flex items-center justify-center gap-2">
-                  <span className="text-sm font-mono font-bold text-blue-400">{getReferenceNote(selectedPayment)}</span>
-                  <button 
-                    onClick={() => {
-                      navigator.clipboard.writeText(getReferenceNote(selectedPayment!));
-                      alert('Note copied! Paste this in the GPay "Add a note" field.');
-                    }}
-                    className="text-[10px] font-bold text-neutral-500 hover:text-neutral-400 underline"
-                  >
-                    Copy
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <button 
-                onClick={() => handlePaytmPayment(selectedPayment)}
-                className="w-full py-4 bg-[#00baf2] text-white rounded-2xl font-bold hover:bg-[#0099cc] transition-all shadow-lg shadow-blue-900/20 flex items-center justify-center gap-2"
-              >
-                <CreditCard size={20} />
-                Pay via Paytm (UPI)
-              </button>
-
-              <button 
-                onClick={() => handleRazorpayPayment(selectedPayment)}
-                className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-500 transition-all shadow-lg shadow-indigo-900/20 flex items-center justify-center gap-2"
-              >
-                <CreditCard size={20} />
-                Pay via Razorpay (Instant)
-              </button>
-              
-              <div className="relative py-4">
-                <div className="w-full border-t border-neutral-800"></div>
-                <div className="relative flex justify-center text-xs uppercase -mt-2">
-                  <span className="bg-neutral-900 px-2 text-neutral-500 font-bold">Or use Direct UPI</span>
-                </div>
-              </div>
-
-              <a 
-                href={getUpiUrl(selectedPayment)}
-                className="block w-full py-4 bg-indigo-600 text-white rounded-2xl text-center font-bold hover:bg-indigo-500 transition-all shadow-lg shadow-indigo-900/20"
-              >
-                Pay via UPI App
-              </a>
-              <div className="grid grid-cols-2 gap-3">
-                <button 
-                  onClick={() => {
-                    navigator.clipboard.writeText(BANK_DETAILS.upiId);
-                    alert('UPI ID Copied!');
-                  }}
-                  className="py-3 bg-neutral-800 text-neutral-300 rounded-2xl font-bold text-xs hover:bg-neutral-700 transition-all border border-neutral-700"
-                >
-                  Copy UPI ID
-                </button>
-                <button 
-                  onClick={() => {
-                    navigator.clipboard.writeText(selectedPayment!.amount.toString());
-                    alert('Amount Copied!');
-                  }}
-                  className="py-3 bg-neutral-800 text-neutral-300 rounded-2xl font-bold text-xs hover:bg-neutral-700 transition-all border border-neutral-700"
-                >
-                  Copy Amount
-                </button>
-              </div>
-              <button 
-                onClick={() => setShowProofModal(true)}
-                className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-bold hover:bg-emerald-500 transition-all shadow-lg shadow-emerald-900/20"
-              >
-                I have completed the payment
-              </button>
-              <button 
-                onClick={() => setShowPaymentModal(false)}
-                className="w-full py-3 text-neutral-500 font-bold hover:text-neutral-400"
-              >
-                Cancel
-              </button>
-            </div>
-
-            <div className="mt-6 p-4 bg-blue-900/20 rounded-2xl text-left border border-blue-800/50">
-              <p className="text-[10px] font-bold text-blue-400 uppercase mb-1">How it works:</p>
-              <p className="text-[11px] text-blue-300 leading-relaxed">
-                The <strong>Transaction Note</strong> above is unique to you. When you pay, this note appears in the Admin's bank statement. This allows the Admin to verify your payment instantly even without a screenshot!
-              </p>
-            </div>
-
-            <div className="mt-6 pt-6 border-t border-neutral-800 text-left">
-              <p className="text-[10px] font-bold text-neutral-500 uppercase mb-2">Bank Details</p>
-              <div className="text-sm text-neutral-400 space-y-1">
-                <p>Account: <span className="font-mono">{BANK_DETAILS.account}</span></p>
-                <p>IFSC: <span className="font-mono">{BANK_DETAILS.ifsc}</span></p>
-                <p>Name: <span className="font-medium">{BANK_DETAILS.name}</span></p>
-              </div>
-            </div>
-          </motion.div>
-        </div>
-      )}
-
-      {/* Proof of Payment Modal */}
-      {showProofModal && selectedPayment && (
+      {deletingUser && (
         <div className="fixed inset-0 bg-neutral-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
           <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-neutral-900 w-full max-w-md max-h-[90vh] overflow-y-auto p-8 rounded-3xl shadow-2xl border border-neutral-800"
+            className="bg-neutral-900 w-full max-w-sm p-8 rounded-3xl shadow-2xl border border-neutral-800 text-center"
           >
-            <h3 className="text-2xl font-bold text-neutral-100 mb-2">Submit Payment Proof</h3>
-            <p className="text-sm text-neutral-500 mb-6">Enter the transaction details to update the Admin dashboard.</p>
-            
-            <div className="space-y-6">
-              <div className="bg-green-900/20 p-5 rounded-2xl border border-green-800/50">
-                <p className="text-sm font-bold text-green-400 mb-2">Option 1: Share via WhatsApp (Recommended)</p>
-                <p className="text-[11px] text-green-300 mb-4 leading-relaxed">
-                  In Google Pay, click the <strong>Share</strong> icon on the payment screen and send the receipt to the Admin. Then click the button below to notify the app.
-                </p>
-                <button 
-                  onClick={sendWhatsAppReceipt}
-                  className="w-full py-3 bg-green-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-green-500 transition-all"
-                >
-                  <MessageCircle size={20} />
-                  Open Admin WhatsApp
-                </button>
-              </div>
-
-              <div className="relative">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-neutral-800"></div>
-                </div>
-                <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-neutral-900 px-2 text-neutral-500 font-bold">OR</span>
-                </div>
-              </div>
-              
-              <div>
-                <p className="text-sm font-bold text-neutral-100 mb-2 text-center">Option 2: Upload Receipt File</p>
-                <p className="text-[11px] text-neutral-500 mb-4 text-center leading-relaxed">
-                  If you saved the receipt to your phone gallery, upload it here.
-                </p>
-                <div className="relative">
-                  <input 
-                    type="file" 
-                    accept="image/*"
-                    onChange={handleFileChange}
-                    className="hidden"
-                    id="screenshot-upload"
-                  />
-                  <label 
-                    htmlFor="screenshot-upload"
-                    className="flex flex-col items-center justify-center w-full h-48 border-2 border-dashed border-neutral-800 rounded-3xl cursor-pointer hover:bg-neutral-800/50 transition-all overflow-hidden"
-                  >
-                    {screenshot ? (
-                      <img src={screenshot} className="h-full w-full object-contain bg-neutral-800" alt="Preview" />
-                    ) : (
-                      <>
-                        <Plus className="text-neutral-500 mb-1" size={24} />
-                        <span className="text-xs text-neutral-500 font-bold">Tap to select file</span>
-                      </>
-                    )}
-                  </label>
-                </div>
-              </div>
+            <div className="w-16 h-16 bg-rose-900/30 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-4">
+              <AlertCircle size={32} />
             </div>
-
-            <div className="flex gap-3 mt-8">
+            <h3 className="text-xl font-bold text-neutral-100 mb-2">Delete Resident</h3>
+            <p className="text-neutral-500 mb-8">
+              Are you sure you want to delete <span className="text-neutral-200 font-bold">{deletingUser.displayName}</span>? 
+              This action cannot be undone and will remove all their profile data.
+            </p>
+            <div className="flex gap-3">
               <button 
-                onClick={() => setShowProofModal(false)}
-                className="flex-1 py-3 text-neutral-500 font-bold hover:bg-neutral-800 rounded-xl transition-colors"
-              >
-                Back
-              </button>
-              <button 
-                onClick={() => confirmPayment(screenshot ? 'upload' : 'whatsapp')}
-                className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-500 shadow-lg shadow-indigo-900/20 transition-all"
-              >
-                I have sent it
-              </button>
-            </div>
-          </motion.div>
-        </div>
-      )}
-      {showAddModal && (
-        <div className="fixed inset-0 bg-neutral-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-neutral-900 w-full max-w-md max-h-[90vh] overflow-y-auto p-8 rounded-3xl shadow-2xl border border-neutral-800"
-          >
-            <h3 className="text-2xl font-bold text-neutral-100 mb-6">Generate Maintenance Bills</h3>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-neutral-500 uppercase mb-2">Amount (₹)</label>
-                <input 
-                  type="number" 
-                  value={amount} 
-                  onChange={(e) => setAmount(e.target.value)}
-                  className="w-full px-4 py-3 bg-neutral-800 border border-neutral-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-neutral-500 uppercase mb-2">Billing Month</label>
-                <input 
-                  type="month" 
-                  value={month} 
-                  onChange={(e) => setMonth(e.target.value)}
-                  className="w-full px-4 py-3 bg-neutral-800 border border-neutral-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-neutral-500 uppercase mb-2">Target Units</label>
-                <select 
-                  value={targetUnit} 
-                  onChange={(e) => setTargetUnit(e.target.value)}
-                  className="w-full px-4 py-3 bg-neutral-800 border border-neutral-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100"
-                >
-                  <option value="all">All Residents</option>
-                  {residents.filter(r => r.unitNumber).map(r => (
-                    <option key={r.uid} value={r.unitNumber}>Unit {r.unitNumber} ({r.displayName})</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div className="flex gap-3 mt-8">
-              <button 
-                onClick={() => setShowAddModal(false)}
-                className="flex-1 py-3 text-neutral-500 font-bold hover:bg-neutral-800 rounded-xl transition-colors"
+                onClick={() => setDeletingUser(null)}
+                disabled={isDeleting}
+                className="flex-1 py-3 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-xl font-bold transition-all disabled:opacity-50"
               >
                 Cancel
               </button>
               <button 
-                onClick={handleGeneratePayments}
-                className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-500 shadow-lg shadow-indigo-900/20 transition-all"
+                onClick={handleDeleteUser}
+                disabled={isDeleting}
+                className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-rose-900/20 disabled:opacity-50 flex items-center justify-center gap-2"
               >
-                Generate
+                {isDeleting ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  "Delete"
+                )}
               </button>
             </div>
           </motion.div>
         </div>
       )}
+
+      <AnimatePresence>
+        {confirmingRoleChange && (
+          <div className="fixed inset-0 bg-neutral-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-neutral-900 w-full max-w-sm p-8 rounded-3xl shadow-2xl border border-neutral-800 text-center"
+            >
+              <div className="w-16 h-16 bg-amber-900/30 text-amber-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                <AlertCircle size={32} />
+              </div>
+              <h3 className="text-xl font-bold text-neutral-100 mb-2">Confirm Role Change</h3>
+              <p className="text-neutral-500 mb-8">
+                Are you sure you want to change <span className="text-neutral-200 font-bold">{confirmingRoleChange.user.displayName}</span>'s role to <span className="text-amber-500 font-bold uppercase">{confirmingRoleChange.newRole}</span>?
+              </p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setConfirmingRoleChange(null)}
+                  className="flex-1 py-3 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-xl font-bold transition-all"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleConfirmRoleChange}
+                  className="flex-1 py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-amber-900/20"
+                >
+                  Change Role
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
 
-function AnnouncementManagement({ announcements, isAdmin, profile }: { announcements: Announcement[], isAdmin: boolean, profile: UserProfile }) {
+
+function AnnouncementManagement({ announcements, isAdmin, isSuperAdmin, profile }: { announcements: Announcement[], isAdmin: boolean, isSuperAdmin: boolean, profile: UserProfile }) {
   const [showAddModal, setShowAddModal] = useState(false);
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
+  const [confirmingDeletion, setConfirmingDeletion] = useState<string | null>(null);
 
   const handlePost = async () => {
     try {
@@ -2417,14 +1987,27 @@ function AnnouncementManagement({ announcements, isAdmin, profile }: { announcem
       setShowAddModal(false);
       setTitle('');
       setContent('');
+      toast.success("Announcement posted");
     } catch (error) {
       console.error("Post failed:", error);
+      toast.error("Failed to post announcement");
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (window.confirm("Delete this announcement?")) {
-      await deleteDoc(doc(db, 'announcements', id));
+  const handleDelete = (id: string) => {
+    setConfirmingDeletion(id);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!confirmingDeletion) return;
+    try {
+      await deleteDoc(doc(db, 'announcements', confirmingDeletion));
+      toast.success("Announcement deleted");
+    } catch (error) {
+      console.error("Delete failed:", error);
+      toast.error("Failed to delete announcement");
+    } finally {
+      setConfirmingDeletion(null);
     }
   };
 
@@ -2432,7 +2015,7 @@ function AnnouncementManagement({ announcements, isAdmin, profile }: { announcem
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-neutral-100">Announcements</h2>
-        {isAdmin && (
+        {isSuperAdmin && (
           <button 
             onClick={() => setShowAddModal(true)}
             className="flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-500 transition-all shadow-lg shadow-indigo-900/20"
@@ -2450,7 +2033,7 @@ function AnnouncementManagement({ announcements, isAdmin, profile }: { announcem
               <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">
                 {format(ann.createdAt?.toDate() || new Date(), 'MMMM d, yyyy')}
               </span>
-              {isAdmin && (
+              {isSuperAdmin && (
                 <button 
                   onClick={() => handleDelete(ann.id)}
                   className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-500 transition-all"
@@ -2518,11 +2101,348 @@ function AnnouncementManagement({ announcements, isAdmin, profile }: { announcem
           </motion.div>
         </div>
       )}
+
+      <AnimatePresence>
+        {confirmingDeletion && (
+          <div className="fixed inset-0 bg-neutral-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-neutral-900 w-full max-w-sm p-8 rounded-3xl shadow-2xl border border-neutral-800 text-center"
+            >
+              <div className="w-16 h-16 bg-rose-900/30 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Trash2 size={32} />
+              </div>
+              <h3 className="text-xl font-bold text-neutral-100 mb-2">Delete Announcement</h3>
+              <p className="text-neutral-500 mb-8">
+                Are you sure you want to delete this announcement? This action cannot be undone.
+              </p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setConfirmingDeletion(null)}
+                  className="flex-1 py-3 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-xl font-bold transition-all"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleConfirmDelete}
+                  className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-rose-900/20"
+                >
+                  Delete
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
 
-function AccountsManagement({ accounts, isAdmin }: { accounts: AccountEntry[], isAdmin: boolean }) {
+function PaymentReport({ accounts, payments, residents }: { accounts: AccountEntry[], payments: PaymentRecord[], residents: UserProfile[] }) {
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [hoveredCell, setHoveredCell] = useState<{ flat: string, month: number } | null>(null);
+  
+  const owners = useMemo(() => {
+    return residents
+      .filter(r => r.role === 'owner')
+      .sort((a, b) => (a.flatNumber || '').localeCompare(b.flatNumber || ''));
+  }, [residents]);
+
+  const paymentMap = useMemo(() => {
+    const map = new Map<string, Map<string, any>>(); // flat -> "YYYY-MM" -> data
+
+    // 1. Process accounts (manual entries)
+    accounts.forEach(acc => {
+      if (acc.income === 0 && !acc.isAdvanceAllocation) return;
+      if (acc.isOpeningBalance || acc.isWithdrawal) return;
+
+      const particulars = acc.particulars;
+      const match = particulars.match(/^([A-Z0-9]+)\s+(.*?)\s*\((.*?)\)$/);
+      const flat = match ? match[1] : (acc.particulars.split(' ')[0] || 'N/A');
+      
+      if (!map.has(flat)) map.set(flat, new Map());
+      const flatMap = map.get(flat)!;
+
+      const dateObj = acc.date instanceof Date ? acc.date : acc.date?.toDate();
+      
+      if (acc.isAdvanceAllocation) {
+        // Shadow entries explicitly have forMonth and forYear
+        const monthIdx = MONTHS.indexOf(acc.forMonth || '');
+        if (monthIdx !== -1) {
+          const key = `${acc.forYear}-${String(monthIdx).padStart(2, '0')}`;
+          flatMap.set(key, {
+            amount: acc.displayAmount || 0,
+            date: acc.originalPaymentDate?.toDate() || null,
+            source: 'Manual (Advance)',
+            particulars: acc.particulars
+          });
+        }
+      } else if (acc.income > 0) {
+        // Main entries might cover multiple months. 
+        // We need to figure out which months they cover.
+        const description = match ? match[3] : '';
+        if (description.includes(' to ')) {
+          // Range payment: e.g. "JAN to MAR"
+          const parts = description.replace('Advance: ', '').split(' to ');
+          const fromMonth = parts[0].split(' ')[0];
+          const toMonth = parts[1].split(' ')[0];
+          const year = parseInt(parts[1].split(' ')[1]) || dateObj?.getFullYear() || selectedYear;
+          
+          const startIdx = MONTHS.indexOf(fromMonth);
+          const endIdx = MONTHS.indexOf(toMonth);
+          
+          if (startIdx !== -1 && endIdx !== -1) {
+            const count = (endIdx - startIdx + 12) % 12 + 1;
+            const monthlyAmount = acc.income / count;
+            for (let i = 0; i < count; i++) {
+              const mIdx = (startIdx + i) % 12;
+              const mYear = year + Math.floor((startIdx + i) / 12);
+              const key = `${mYear}-${String(mIdx).padStart(2, '0')}`;
+              // Only set if not already set by a shadow entry (to avoid double counting)
+              if (!flatMap.has(key)) {
+                flatMap.set(key, {
+                  amount: monthlyAmount,
+                  date: dateObj,
+                  source: 'Manual',
+                  particulars: acc.particulars
+                });
+              }
+            }
+          }
+        } else {
+          // Single month payment
+          const monthPart = description.split(' ')[0];
+          const yearPart = parseInt(description.split(' ')[1]) || dateObj?.getFullYear() || selectedYear;
+          const mIdx = MONTHS.indexOf(monthPart);
+          if (mIdx !== -1) {
+            const key = `${yearPart}-${String(mIdx).padStart(2, '0')}`;
+            flatMap.set(key, {
+              amount: acc.income,
+              date: dateObj,
+              source: 'Manual',
+              particulars: acc.particulars
+            });
+          } else if (dateObj) {
+            // Fallback to payment date if description parsing fails
+            const key = `${dateObj.getFullYear()}-${String(dateObj.getMonth()).padStart(2, '0')}`;
+            if (!flatMap.has(key)) {
+              flatMap.set(key, {
+                amount: acc.income,
+                date: dateObj,
+                source: 'Manual',
+                particulars: acc.particulars
+              });
+            }
+          }
+        }
+      }
+    });
+
+    // 2. Process online payments
+    payments.forEach(p => {
+      if (p.status !== 'paid') return;
+      const flat = p.flatNumber;
+      if (!map.has(flat)) map.set(flat, new Map());
+      const flatMap = map.get(flat)!;
+
+      const [year, month] = p.month.split('-').map(Number);
+      const key = `${year}-${String(month - 1).padStart(2, '0')}`;
+      
+      const dateObj = p.paidAt instanceof Date ? p.paidAt : p.paidAt?.toDate() || p.createdAt?.toDate();
+
+      flatMap.set(key, {
+        amount: p.amount,
+        date: dateObj,
+        source: 'Online',
+        particulars: `Online Payment - Ref: ${p.transactionId || 'N/A'}`
+      });
+    });
+
+    return map;
+  }, [accounts, payments, selectedYear]);
+
+  const currentMonth = new Date().getMonth();
+  const currentYear = new Date().getFullYear();
+  
+  // System start date: March 2026
+  const SYSTEM_START_MONTH = 2; // March
+  const SYSTEM_START_YEAR = 2026;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-neutral-100">Maintenance Ledger</h2>
+          <p className="text-sm text-neutral-500">Track monthly payments for all residents.</p>
+        </div>
+        
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 bg-neutral-900 p-1 rounded-xl border border-neutral-800">
+            <button 
+              onClick={() => setSelectedYear(prev => prev - 1)}
+              className="p-1.5 hover:bg-neutral-800 rounded-lg text-neutral-400 transition-colors"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <span className="text-sm font-black text-neutral-200 px-2">{selectedYear}</span>
+            <button 
+              onClick={() => setSelectedYear(prev => prev + 1)}
+              className="p-1.5 hover:bg-neutral-800 rounded-lg text-neutral-400 transition-colors"
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
+          
+          <button 
+            onClick={() => {
+              const csvContent = "data:text/csv;charset=utf-8," 
+                + "Resident,Flat," + MONTHS.join(",") + "\n"
+                + owners.map(o => {
+                  const flatMap = paymentMap.get(o.flatNumber || '') || new Map();
+                  const row = MONTHS.map((_, i) => {
+                    const key = `${selectedYear}-${String(i).padStart(2, '0')}`;
+                    const isFuture = selectedYear > currentYear || (selectedYear === currentYear && i > currentMonth);
+                    const isBeforeStart = selectedYear < SYSTEM_START_YEAR || (selectedYear === SYSTEM_START_YEAR && i < SYSTEM_START_MONTH);
+                    const isCurrentMonth = selectedYear === currentYear && i === currentMonth;
+                    
+                    if (flatMap.has(key)) return "PAID";
+                    if (isFuture || isBeforeStart || isCurrentMonth) return "-";
+                    return "PENDING";
+                  });
+                  return `"${o.displayName}","${o.flatNumber}",` + row.join(",");
+                }).join("\n");
+              const encodedUri = encodeURI(csvContent);
+              const link = document.createElement("a");
+              link.setAttribute("href", encodedUri);
+              link.setAttribute("download", `maintenance_report_${selectedYear}.csv`);
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+            }}
+            className="flex items-center gap-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 px-4 py-2 rounded-xl font-bold text-sm transition-all border border-neutral-700"
+          >
+            <Download size={18} />
+            Export CSV
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-neutral-900 rounded-3xl border border-neutral-800 overflow-hidden shadow-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-neutral-800/50">
+                <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest border-r border-neutral-800 sticky left-0 bg-neutral-900/95 backdrop-blur-sm z-20">Resident</th>
+                {MONTHS.map((month, i) => (
+                  <th key={month} className="px-2 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest text-center border-r border-neutral-800">
+                    {month}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-neutral-800">
+              {owners.map((owner) => {
+                const flat = owner.flatNumber || '';
+                const flatMap = paymentMap.get(flat) || new Map();
+                
+                return (
+                  <tr key={owner.uid} className="hover:bg-neutral-800/30 transition-colors group">
+                    <td className="px-6 py-4 border-r border-neutral-800 sticky left-0 bg-neutral-900/95 backdrop-blur-sm z-10 group-hover:bg-neutral-800/50 transition-colors">
+                      <p className="text-sm font-bold text-neutral-100 truncate max-w-[150px]">{owner.displayName}</p>
+                      <p className="text-[10px] font-bold text-neutral-500">{flat}</p>
+                    </td>
+                    {MONTHS.map((_, i) => {
+                      const key = `${selectedYear}-${String(i).padStart(2, '0')}`;
+                      const payment = flatMap.get(key);
+                      const isFuture = selectedYear > currentYear || (selectedYear === currentYear && i > currentMonth);
+                      const isBeforeStart = selectedYear < SYSTEM_START_YEAR || (selectedYear === SYSTEM_START_YEAR && i < SYSTEM_START_MONTH);
+                      const isCurrentMonth = selectedYear === currentYear && i === currentMonth;
+                      
+                      // A month is pending only if it's NOT paid, NOT in the future, NOT before system start, and NOT the current month
+                      const isPending = !payment && !isFuture && !isBeforeStart && !isCurrentMonth;
+                      
+                      return (
+                        <td 
+                          key={i} 
+                          className="p-1 border-r border-neutral-800 relative"
+                          onMouseEnter={() => setHoveredCell({ flat, month: i })}
+                          onMouseLeave={() => setHoveredCell(null)}
+                        >
+                          <div className={cn(
+                            "w-full aspect-square rounded-lg flex items-center justify-center transition-all duration-300",
+                            payment ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20" : 
+                            isPending ? "bg-rose-500/10 text-rose-500 border border-rose-500/20" : 
+                            "bg-neutral-800/20 text-neutral-700 border border-transparent"
+                          )}>
+                            {payment ? <Check size={14} strokeWidth={3} /> : isPending ? <AlertCircle size={14} /> : null}
+                          </div>
+
+                          <AnimatePresence>
+                            {hoveredCell?.flat === flat && hoveredCell?.month === i && (
+                              <motion.div 
+                                initial={{ opacity: 0, scale: 0.9, y: 10 }}
+                                animate={{ opacity: 1, scale: 1, y: 0 }}
+                                exit={{ opacity: 0, scale: 0.9, y: 10 }}
+                                className={cn(
+                                  "absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-3 rounded-xl shadow-2xl z-50 pointer-events-none border",
+                                  payment ? "bg-neutral-900 border-emerald-500/30" : "bg-neutral-900 border-rose-500/30"
+                                )}
+                              >
+                                <div className="space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">{MONTHS[i]} {selectedYear}</span>
+                                    <span className={cn(
+                                      "text-[10px] font-bold px-1.5 py-0.5 rounded",
+                                      payment ? "bg-emerald-500/20 text-emerald-400" : "bg-rose-500/20 text-rose-400"
+                                    )}>
+                                      {payment ? 'PAID' : 'PENDING'}
+                                    </span>
+                                  </div>
+                                  
+                                  {payment ? (
+                                    <>
+                                      <div className="flex justify-between items-center">
+                                        <span className="text-[10px] text-neutral-500">Amount</span>
+                                        <span className="text-xs font-bold text-emerald-400">₹{payment.amount.toLocaleString()}</span>
+                                      </div>
+                                      <div className="flex justify-between items-center">
+                                        <span className="text-[10px] text-neutral-500">Date</span>
+                                        <span className="text-xs text-neutral-300">{payment.date ? format(payment.date, 'dd MMM yyyy') : 'N/A'}</span>
+                                      </div>
+                                      <div className="pt-1 border-t border-neutral-800">
+                                        <p className="text-[9px] text-neutral-500 leading-tight italic">{payment.particulars}</p>
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <div className="py-1">
+                                      <p className="text-xs text-rose-400 font-medium">Payment is overdue for this month.</p>
+                                    </div>
+                                  )}
+                                </div>
+                                <div className={cn(
+                                  "absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent",
+                                  payment ? "border-t-neutral-900" : "border-t-neutral-900"
+                                )} />
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AccountsManagement({ accounts, isAdmin, isSuperAdmin }: { accounts: AccountEntry[], isAdmin: boolean, isSuperAdmin: boolean }) {
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   
@@ -2547,8 +2467,8 @@ function AccountsManagement({ accounts, isAdmin }: { accounts: AccountEntry[], i
     income: 0,
     expense: 0,
     method: 'bank',
-    forMonth: MONTHS[new Date().getMonth() === 0 ? 11 : new Date().getMonth() - 1],
-    forYear: new Date().getMonth() === 0 ? new Date().getFullYear() - 1 : new Date().getFullYear()
+    forMonth: MONTHS[new Date().getMonth()],
+    forYear: new Date().getFullYear()
   });
 
   const months = MONTHS;
@@ -2796,8 +2716,8 @@ function AccountsManagement({ accounts, isAdmin }: { accounts: AccountEntry[], i
         openingBank: 0,
         openingIncome: 0,
         openingExpense: 0,
-        forMonth: MONTHS[new Date().getMonth() === 0 ? 11 : new Date().getMonth() - 1],
-        forYear: new Date().getMonth() === 0 ? new Date().getFullYear() - 1 : new Date().getFullYear()
+        forMonth: MONTHS[new Date().getMonth()],
+        forYear: new Date().getFullYear()
       });
     } catch (err: any) {
       const errorMessage = err.message || "An unexpected error occurred.";
@@ -2900,14 +2820,14 @@ function AccountsManagement({ accounts, isAdmin }: { accounts: AccountEntry[], i
             <h3 className="text-xl font-bold text-neutral-100">{months[selectedMonth]} {selectedYear} Accounts</h3>
             <p className="text-sm text-neutral-500">Monthly income and expense tracking.</p>
           </div>
-          {isAdmin && (
+          {isSuperAdmin && (
             <div className="flex items-center gap-2">
               <button 
                 onClick={() => setShowQuickModal(true)}
                 className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl font-bold transition-all shadow-lg shadow-emerald-900/20"
               >
                 <Zap size={18} />
-                Quick Maintenance
+                Post Maintenance
               </button>
               <button 
                 onClick={() => setShowAddModal(true)}
@@ -2930,7 +2850,7 @@ function AccountsManagement({ accounts, isAdmin }: { accounts: AccountEntry[], i
                 <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest border-r border-neutral-700 text-right">Income (₹)</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest border-r border-neutral-700 text-right">Expense (₹)</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest text-right">Running Balance</th>
-                {isAdmin && <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest text-center">Actions</th>}
+                {isSuperAdmin && <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest text-center">Actions</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-700">
@@ -3035,7 +2955,7 @@ function AccountsManagement({ accounts, isAdmin }: { accounts: AccountEntry[], i
                         <span className="text-xs text-blue-400">B: ₹{acc.runningBankBalance?.toLocaleString()}</span>
                       </div>
                     </td>
-                    {isAdmin && (
+                    {isSuperAdmin && (
                       <td className="px-6 py-4 text-center">
                         <div className="flex items-center justify-center gap-1">
                           <button 
@@ -3066,7 +2986,7 @@ function AccountsManagement({ accounts, isAdmin }: { accounts: AccountEntry[], i
                   <td className="px-6 py-4 text-right text-emerald-400 border-r border-neutral-700">₹{monthlyTotals.income.toLocaleString()}</td>
                   <td className="px-6 py-4 text-right text-rose-400 border-r border-neutral-700">₹{monthlyTotals.expense.toLocaleString()}</td>
                   <td className="px-6 py-4 text-right text-white">₹{balances.monthEnd.cashInHand.toLocaleString()}</td>
-                  {isAdmin && <td></td>}
+                  {isSuperAdmin && <td></td>}
                 </tr>
               </tfoot>
             )}
@@ -3085,8 +3005,8 @@ function AccountsManagement({ accounts, isAdmin }: { accounts: AccountEntry[], i
             >
               <div className="flex items-center justify-between mb-6">
                 <div>
-                  <h3 className="text-2xl font-bold text-neutral-100">Quick Maintenance Entry</h3>
-                  <p className="text-sm text-neutral-500">Post monthly maintenance for all owners at once.</p>
+                  <h3 className="text-2xl font-bold text-neutral-100">Post Maintenance Receipts</h3>
+                  <p className="text-sm text-neutral-500">Select residents to record their online maintenance payments manually.</p>
                 </div>
                 <button onClick={() => setShowQuickModal(false)} className="p-2 text-neutral-500 hover:text-neutral-300">
                   <X size={24} />
@@ -3097,6 +3017,7 @@ function AccountsManagement({ accounts, isAdmin }: { accounts: AccountEntry[], i
                 onClose={() => setShowQuickModal(false)} 
                 onSuccess={() => {
                   setShowQuickModal(false);
+                  toast.success("Maintenance posted successfully!");
                 }}
               />
             </motion.div>
@@ -3122,7 +3043,9 @@ function AccountsManagement({ accounts, isAdmin }: { accounts: AccountEntry[], i
                     particulars: '',
                     income: 0,
                     expense: 0,
-                    method: 'cash'
+                    method: 'cash',
+                    forMonth: MONTHS[new Date().getMonth()],
+                    forYear: new Date().getFullYear()
                   });
                 }} 
                 className="text-neutral-500 hover:text-neutral-300"

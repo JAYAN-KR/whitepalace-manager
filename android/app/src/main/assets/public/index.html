@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WhitePalace - Apartment Management</title>
+    <meta name="description" content="Manage your apartment maintenance and payments at WhitePalace with ease." />
+    <meta name="theme-color" content="#4f46e5" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="https://ui-avatars.com/api/?name=WhitePalace&background=4f46e5&color=fff&size=180" />
+    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js')
+            .then(reg => console.log('Service Worker: Registered'))
+            .catch(err => console.log('Service Worker: Error', err));
+        });
+      }
+    </script>
+    <script type="module" crossorigin src="/assets/index-CAfI13MX.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-a_3sYElB.css">
+  </head>
+  <body>
+    <div id="root">
+      <!-- Static fallback for crawlers - visible until React loads -->
+      <div id="crawler-fallback" style="padding: 20px; font-family: sans-serif;">
+        <h1>WhitePalace - Apartment Management System</h1>
+        <p>Manage your apartment maintenance and payments at WhitePalace with ease.</p>
+        <p>Contact: jkrsanskrit@gmail.com</p>
+        <p><strong>Legal Policies:</strong></p>
+        <ul>
+          <li><a href="/?tab=legal">Terms of Service</a></li>
+          <li><a href="/?tab=legal">Privacy Policy</a></li>
+          <li><a href="/?tab=legal">Refund Policy</a></li>
+        </ul>
+      </div>
+    </div>
+  </body>
+</html>
+

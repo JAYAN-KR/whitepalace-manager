@@ -1,4 +1,4 @@
-export type UserRole = 'admin' | 'owner';
+export type UserRole = 'superadmin' | 'admin' | 'owner';
 
 export interface UserProfile {
   uid: string;
@@ -6,7 +6,7 @@ export interface UserProfile {
   displayName: string;
   photoURL: string;
   role: UserRole;
-  unitNumber?: string;
+  flatNumber?: string;
   createdAt: any;
   mustChangePassword?: boolean;
   isPending?: boolean;
@@ -17,7 +17,7 @@ export interface PaymentRecord {
   id: string;
   ownerUid: string;
   ownerName: string;
-  unitNumber: string;
+  flatNumber: string;
   amount: number;
   month: string;
   status: 'pending' | 'paid' | 'failed' | 'verifying';
