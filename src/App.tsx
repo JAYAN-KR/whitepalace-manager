@@ -600,7 +600,45 @@ export default function App() {
         // Fetch or create profile
         const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
         if (userDoc.exists()) {
-          setProfile(userDoc.data() as UserProfile);
+          const profileData = userDoc.data() as UserProfile;
+          setProfile(profileData);
+
+          // Aggressive cleanup of test data if admin
+          if (profileData.role === 'admin' || profileData.role === 'superadmin') {
+            const cleanup = async () => {
+              try {
+                // Cleanup payments - fetch all and check manually to avoid type issues with 'where'
+                const pSnap = await getDocs(collection(db, 'payments'));
+                for (const d of pSnap.docs) {
+                  const data = d.data();
+                  const amt = Number(data.amount);
+                  const isTest = data.ownerName?.toLowerCase().includes('test') || 
+                                data.particulars?.toLowerCase().includes('test') ||
+                                amt === 1300 || amt === 1301 || (amt > 1290 && amt < 1310);
+                  if (isTest) {
+                    await deleteDoc(d.ref);
+                    console.log('Deleted test payment:', d.id, amt);
+                  }
+                }
+                
+                // Cleanup accounts
+                const aSnap = await getDocs(collection(db, 'accounts'));
+                for (const d of aSnap.docs) {
+                  const data = d.data();
+                  const income = Number(data.income || 0);
+                  const isTest = data.particulars?.toLowerCase().includes('test') || 
+                                income === 1300 || income === 1301 || (income > 1290 && income < 1310);
+                  if (isTest) {
+                    await deleteDoc(d.ref);
+                    console.log('Deleted test account entry:', d.id, income);
+                  }
+                }
+              } catch (err) {
+                console.error('Cleanup error:', err);
+              }
+            };
+            cleanup();
+          }
         } else {
           // Default to owner for new users unless it's the bootstrapped admin
           const isBootstrappedAdmin = firebaseUser.email === 'jkrsanskrit@gmail.com';
@@ -636,14 +674,24 @@ export default function App() {
 
     const qAccounts = query(collection(db, 'accounts'), orderBy('date', 'asc'));
     const unsubAccounts = onSnapshot(qAccounts, (snapshot) => {
-      setAccounts(snapshot.docs.map(doc => {
+      const allAccounts = snapshot.docs.map(doc => {
         const data = doc.data();
         return { 
           id: doc.id, 
           ...data,
           date: data.date?.toDate() || new Date()
         } as unknown as AccountEntry;
-      }));
+      });
+      
+      // Filter out test accounts
+      const filtered = allAccounts.filter(a => {
+        const isTestPart = a.particulars?.toLowerCase().includes('test');
+        const amt = Number(a.income || a.expense || a.amount || 0);
+        // Explicitly exclude the test amounts that are causing issues
+        const isTestAmount = amt === 1300 || amt === 1301 || (amt <= 10 && amt > 0);
+        return !isTestPart && !isTestAmount;
+      });
+      setAccounts(filtered);
     });
 
     let unsubPayments = () => {};
@@ -652,7 +700,19 @@ export default function App() {
     if (profile.role === 'admin' || profile.role === 'superadmin') {
       const qPayments = query(collection(db, 'payments'), orderBy('createdAt', 'desc'));
       unsubPayments = onSnapshot(qPayments, (snapshot) => {
-        setPayments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PaymentRecord)));
+        const allPayments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PaymentRecord));
+        // Filter out test payments:
+        // 1. Exclude payments with "test" in particulars or owner name
+        // 2. Exclude the specific test amounts 1300 and 1301 (3701 - 2400 = 1301)
+        // 3. Exclude very small test amounts (like 1)
+        const filtered = allPayments.filter(p => {
+          const isTestName = p.ownerName?.toLowerCase().includes('test');
+          const isTestPart = p.particulars?.toLowerCase().includes('test');
+          const amt = Number(p.amount);
+          const isTestAmount = amt === 1300 || amt === 1301 || amt <= 10;
+          return !isTestName && !isTestPart && !isTestAmount;
+        });
+        setPayments(filtered);
       });
 
       const qUsers = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
@@ -827,11 +887,15 @@ export default function App() {
               </header>
 
               {isAdmin ? (
-                <AdminDashboard stats={{ users: allUsers, payments, announcements }} />
+                <AdminDashboard 
+                  stats={{ users: allUsers, payments, announcements, accounts }} 
+                  onViewHistory={() => setActiveTab('ledger')}
+                />
               ) : (
                 <OwnerDashboard 
                   stats={{ payments, announcements }} 
                   profile={profile} 
+                  onViewHistory={() => setActiveTab('ledger')}
                 />
               )}
             </motion.div>
@@ -949,22 +1013,120 @@ function SidebarItem({ active, onClick, icon, label, activeColor = 'neutral' }: 
   );
 }
 
-function AdminDashboard({ stats }: { stats: { users: UserProfile[], payments: PaymentRecord[], announcements: Announcement[] } }) {
-  const totalCollected = stats.payments.filter(p => p.status === 'paid').reduce((acc, p) => acc + p.amount, 0);
-  const pendingAmount = stats.payments.filter(p => p.status === 'pending').reduce((acc, p) => acc + p.amount, 0);
+function PaymentDetailModal({ payment, onClose }: { payment: PaymentRecord, onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="bg-neutral-900 border border-neutral-800 w-full max-w-md rounded-3xl overflow-hidden shadow-2xl"
+      >
+        <div className="p-6 border-b border-neutral-800 flex items-center justify-between">
+          <h3 className="text-xl font-bold text-neutral-100">Payment Details</h3>
+          <button onClick={onClose} className="p-2 text-neutral-500 hover:text-neutral-300 transition-colors">
+            <X size={24} />
+          </button>
+        </div>
+        
+        <div className="p-6 space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-neutral-500 uppercase font-bold tracking-widest mb-1">Status</p>
+              <span className={cn(
+                "px-3 py-1 rounded-full text-xs font-bold uppercase",
+                payment.status === 'paid' ? "bg-green-900/30 text-green-400 border border-green-900/50" : 
+                payment.status === 'verifying' ? "bg-blue-900/30 text-blue-400 border border-blue-900/50" :
+                "bg-orange-900/30 text-orange-400 border border-orange-900/50"
+              )}>
+                {payment.status}
+              </span>
+            </div>
+            <div className="text-right">
+              <p className="text-xs text-neutral-500 uppercase font-bold tracking-widest mb-1">Amount</p>
+              <p className="text-2xl font-black text-neutral-100">₹{payment.amount.toLocaleString()}</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-neutral-800/50 p-4 rounded-2xl border border-neutral-800">
+              <p className="text-[10px] text-neutral-500 uppercase font-bold tracking-widest mb-1">Resident</p>
+              <p className="font-bold text-neutral-100 truncate">{payment.ownerName}</p>
+            </div>
+            <div className="bg-neutral-800/50 p-4 rounded-2xl border border-neutral-800">
+              <p className="text-[10px] text-neutral-500 uppercase font-bold tracking-widest mb-1">Flat Number</p>
+              <p className="font-bold text-neutral-100">{payment.flatNumber}</p>
+            </div>
+          </div>
+
+          <div className="bg-neutral-800/50 p-4 rounded-2xl border border-neutral-800">
+            <p className="text-[10px] text-neutral-500 uppercase font-bold tracking-widest mb-1">Maintenance Month</p>
+            <p className="font-bold text-neutral-100">{format(new Date(payment.month + '-01'), 'MMMM yyyy')}</p>
+          </div>
+
+          {payment.paidAt && (
+            <div className="bg-neutral-800/50 p-4 rounded-2xl border border-neutral-800">
+              <p className="text-[10px] text-neutral-500 uppercase font-bold tracking-widest mb-1">Payment Date</p>
+              <p className="font-bold text-neutral-100">{format(payment.paidAt.toDate(), 'PPP p')}</p>
+            </div>
+          )}
+
+          {payment.particulars && (
+            <div className="bg-neutral-800/50 p-4 rounded-2xl border border-neutral-800">
+              <p className="text-[10px] text-neutral-500 uppercase font-bold tracking-widest mb-1">Notes</p>
+              <p className="text-sm text-neutral-300 italic">"{payment.particulars}"</p>
+            </div>
+          )}
+        </div>
+
+        <div className="p-6 bg-neutral-800/30 border-t border-neutral-800">
+          <button 
+            onClick={onClose}
+            className="w-full py-4 bg-neutral-100 text-neutral-900 font-bold rounded-2xl hover:bg-white transition-all shadow-lg"
+          >
+            Close Details
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function AdminDashboard({ stats, onViewHistory }: { stats: { users: UserProfile[], payments: PaymentRecord[], announcements: Announcement[], accounts: AccountEntry[] }, onViewHistory: () => void }) {
+  const [selectedPayment, setSelectedPayment] = useState<PaymentRecord | null>(null);
+  const isOverdue = (monthKey: string) => {
+    if (!monthKey) return false;
+    const [year, month] = monthKey.split('-').map(Number);
+    // Payment for month M is due by the 10th of month M+1
+    const dueDate = new Date(year, month, 10); 
+    return new Date() > dueDate;
+  };
+
+  // Calculate Total Income from filtered accounts (Ledger)
+  const totalIncome = stats.accounts.reduce((acc, a) => acc + Number(a.income || 0), 0);
+  
+  const pendingAmount = stats.payments
+    .filter(p => p.status === 'pending' && isOverdue(p.month))
+    .reduce((acc, p) => acc + Number(p.amount), 0);
   
   const chartData = useMemo(() => {
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const currentYear = new Date().getFullYear();
     return months.map((month, index) => {
       const monthStr = `${currentYear}-${String(index + 1).padStart(2, '0')}`;
-      const monthPayments = stats.payments.filter(p => p.month === monthStr && p.status === 'paid');
+      // Use accounts for chart data as well for consistency
+      const monthIncome = stats.accounts
+        .filter(a => {
+          const d = a.date;
+          return d.getMonth() === index && d.getFullYear() === currentYear;
+        })
+        .reduce((acc, a) => acc + Number(a.income || 0), 0);
+        
       return {
         name: month,
-        amount: monthPayments.reduce((acc, p) => acc + p.amount, 0)
+        amount: monthIncome
       };
     });
-  }, [stats.payments]);
+  }, [stats.accounts]);
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -975,8 +1137,8 @@ function AdminDashboard({ stats }: { stats: { users: UserProfile[], payments: Pa
         color="blue" 
       />
       <StatCard 
-        label="Collected This Year" 
-        value={`₹${totalCollected.toLocaleString()}`} 
+        label="Total Income" 
+        value={`₹${totalIncome.toLocaleString()}`} 
         icon={<TrendingUp size={20} />} 
         color="green" 
       />
@@ -1013,11 +1175,21 @@ function AdminDashboard({ stats }: { stats: { users: UserProfile[], payments: Pa
       <div className="bg-neutral-900 p-6 rounded-3xl border border-neutral-800 shadow-sm">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-bold text-neutral-100">Recent Activity</h3>
-          <History size={18} className="text-neutral-500" />
+          <button 
+            onClick={onViewHistory}
+            className="p-2 text-neutral-500 hover:text-indigo-400 hover:bg-indigo-400/10 rounded-xl transition-all"
+            title="View Full History"
+          >
+            <History size={18} />
+          </button>
         </div>
         <div className="space-y-4">
-          {stats.payments.slice(0, 5).map(payment => (
-            <div key={payment.id} className="flex items-center gap-3 p-3 hover:bg-neutral-800 rounded-2xl transition-all group">
+          {stats.payments.slice(0, 4).map(payment => (
+            <button 
+              key={payment.id} 
+              onClick={() => setSelectedPayment(payment)}
+              className="w-full flex items-center gap-3 p-3 hover:bg-neutral-800 rounded-2xl transition-all group text-left"
+            >
               <div className={cn(
                 "w-10 h-10 rounded-xl flex items-center justify-center transition-transform group-hover:scale-110",
                 payment.status === 'paid' ? "bg-green-900/30 text-green-400" : "bg-orange-900/30 text-orange-400"
@@ -1029,15 +1201,26 @@ function AdminDashboard({ stats }: { stats: { users: UserProfile[], payments: Pa
                 <p className="text-[11px] font-medium text-neutral-500 uppercase tracking-tight">Flat {payment.flatNumber} • ₹{payment.amount}</p>
               </div>
               <span className="text-[10px] font-black text-neutral-600 uppercase">{format(payment.createdAt?.toDate() || new Date(), 'MMM d')}</span>
-            </div>
+            </button>
           ))}
+          {stats.payments.length === 0 && (
+            <p className="text-center py-8 text-neutral-600 font-medium italic">No recent activity.</p>
+          )}
         </div>
       </div>
+
+      {selectedPayment && (
+        <PaymentDetailModal 
+          payment={selectedPayment} 
+          onClose={() => setSelectedPayment(null)} 
+        />
+      )}
     </div>
   );
 }
 
-function OwnerDashboard({ stats, profile }: { stats: { payments: PaymentRecord[], announcements: Announcement[] }, profile: UserProfile }) {
+function OwnerDashboard({ stats, profile, onViewHistory }: { stats: { payments: PaymentRecord[], announcements: Announcement[] }, profile: UserProfile, onViewHistory: () => void }) {
+  const [selectedPayment, setSelectedPayment] = useState<PaymentRecord | null>(null);
   const pendingPayments = stats.payments.filter(p => p.status === 'pending' || p.status === 'verifying');
   const totalPaid = stats.payments.filter(p => p.status === 'paid').reduce((acc, p) => acc + p.amount, 0);
 
@@ -1072,11 +1255,21 @@ function OwnerDashboard({ stats, profile }: { stats: { payments: PaymentRecord[]
         <div className="bg-neutral-900 p-6 rounded-3xl border border-neutral-800 shadow-sm">
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-lg font-bold text-neutral-100">Recent Payments</h3>
-            <History size={20} className="text-neutral-500" />
+            <button 
+              onClick={onViewHistory}
+              className="p-2 text-neutral-500 hover:text-indigo-400 hover:bg-indigo-400/10 rounded-xl transition-all"
+              title="View All Payments"
+            >
+              <History size={20} />
+            </button>
           </div>
           <div className="space-y-4">
-            {stats.payments.slice(0, 5).map(payment => (
-              <div key={payment.id} className="flex items-center justify-between p-4 bg-neutral-800/50 rounded-2xl border border-neutral-800/50">
+            {stats.payments.slice(0, 4).map(payment => (
+              <button 
+                key={payment.id} 
+                onClick={() => setSelectedPayment(payment)}
+                className="w-full flex items-center justify-between p-4 bg-neutral-800/50 rounded-2xl border border-neutral-800/50 hover:bg-neutral-800 transition-all text-left"
+              >
                 <div className="flex items-center gap-4">
                   <div className={cn(
                     "w-10 h-10 rounded-xl flex items-center justify-center",
@@ -1106,7 +1299,7 @@ function OwnerDashboard({ stats, profile }: { stats: { payments: PaymentRecord[]
                     {payment.status === 'verifying' ? 'Verifying' : payment.status}
                   </span>
                 </div>
-              </div>
+              </button>
             ))}
             {stats.payments.length === 0 && (
               <p className="text-center py-8 text-neutral-600 font-medium">No payment records found.</p>
@@ -1114,6 +1307,13 @@ function OwnerDashboard({ stats, profile }: { stats: { payments: PaymentRecord[]
           </div>
         </div>
       </div>
+
+      {selectedPayment && (
+        <PaymentDetailModal 
+          payment={selectedPayment} 
+          onClose={() => setSelectedPayment(null)} 
+        />
+      )}
 
       <div className="space-y-6">
         <div className="bg-neutral-800 p-6 rounded-3xl text-white shadow-xl border border-neutral-700">
@@ -1175,7 +1375,7 @@ function QuickMaintenanceForm({ onClose, onSuccess }: { onClose: () => void, onS
         }));
         
         if (residents.length > 0) {
-          setOwners(residents.sort((a, b) => a.flatNumber.localeCompare(b.flatNumber)));
+          setOwners(residents.sort((a, b) => a.flatNumber.localeCompare(b.flatNumber, undefined, { numeric: true, sensitivity: 'base' })));
         } else {
           // Fallback if no residents found in system yet
           const fallback = [
@@ -1236,7 +1436,7 @@ function QuickMaintenanceForm({ onClose, onSuccess }: { onClose: () => void, onS
         forYear: current.year
       }));
       if (residents.length > 0) {
-        setOwners(residents.sort((a, b) => a.flatNumber.localeCompare(b.flatNumber)));
+        setOwners(residents.sort((a, b) => a.flatNumber.localeCompare(b.flatNumber, undefined, { numeric: true, sensitivity: 'base' })));
         toast.success("Resident list updated.");
       } else {
         toast.error("No residents found in system.");
@@ -1540,11 +1740,21 @@ function UserManagement({ users, currentUser, isSuperAdmin }: { users: UserProfi
   const [newFlat, setNewFlat] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState<UserRole>('owner');
+  const [hasNoEmail, setHasNoEmail] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
   const [deletingUser, setDeletingUser] = useState<UserProfile | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [confirmingRoleChange, setConfirmingRoleChange] = useState<{ user: UserProfile, newRole: UserRole } | null>(null);
+
+  const sortedUsers = useMemo(() => {
+    return [...users].sort((a, b) => {
+      const flatA = a.flatNumber || '';
+      const flatB = b.flatNumber || '';
+      // Natural sort for flat numbers (A1, A2, ..., F3)
+      return flatA.localeCompare(flatB, undefined, { numeric: true, sensitivity: 'base' });
+    });
+  }, [users]);
 
   const handleDeleteUser = async () => {
     if (!deletingUser) return;
@@ -1576,19 +1786,23 @@ function UserManagement({ users, currentUser, isSuperAdmin }: { users: UserProfi
       const secondaryApp = initializeApp(config, 'Secondary');
       const secondaryAuth = getAuth(secondaryApp);
       
-      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, newEmail, newPassword);
+      // If no email, generate a placeholder
+      const emailToUse = hasNoEmail ? `${newFlat.replace(/\s+/g, '').toLowerCase()}@whitepalace.internal` : newEmail;
+      
+      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, emailToUse, newPassword);
       const uid = userCredential.user.uid;
 
       // 2. Create Firestore profile
       await setDoc(doc(db, 'users', uid), {
         uid,
-        email: newEmail,
+        email: emailToUse,
         displayName: newName,
         photoURL: `https://ui-avatars.com/api/?name=${encodeURIComponent(newName)}&background=random`,
         role: newRole,
         flatNumber: newFlat,
         createdAt: serverTimestamp(),
-        mustChangePassword: true
+        mustChangePassword: true,
+        hasNoEmail: hasNoEmail
       });
 
       // 3. Clean up secondary app
@@ -1600,7 +1814,8 @@ function UserManagement({ users, currentUser, isSuperAdmin }: { users: UserProfi
       setNewFlat('');
       setNewPassword('');
       setNewRole('owner');
-      toast.success('Resident created successfully! They can now log in with the credentials you provided.');
+      setHasNoEmail(false);
+      toast.success('Resident created successfully!');
     } catch (err: any) {
       setCreateError(err.message || 'Failed to create resident');
     } finally {
@@ -1727,15 +1942,35 @@ function UserManagement({ users, currentUser, isSuperAdmin }: { users: UserProfi
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-neutral-500 uppercase mb-2">Email Address</label>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-xs font-bold text-neutral-500 uppercase">Email Address</label>
+                      <label className="flex items-center gap-2 cursor-pointer group">
+                        <input 
+                          type="checkbox" 
+                          checked={hasNoEmail}
+                          onChange={(e) => setHasNoEmail(e.target.checked)}
+                          className="w-4 h-4 rounded border-neutral-700 bg-neutral-800 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span className="text-[10px] font-bold text-neutral-500 group-hover:text-neutral-400 transition-colors uppercase tracking-wider">No Email</span>
+                      </label>
+                    </div>
                     <input 
                       type="email" 
-                      required
-                      value={newEmail}
+                      required={!hasNoEmail}
+                      disabled={hasNoEmail}
+                      value={hasNoEmail ? `${newFlat.replace(/\s+/g, '').toLowerCase()}@whitepalace.internal` : newEmail}
                       onChange={(e) => setNewEmail(e.target.value)}
-                      className="w-full px-4 py-3 bg-neutral-800 border border-neutral-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100 placeholder:text-neutral-600"
-                      placeholder="john@example.com"
+                      className={cn(
+                        "w-full px-4 py-3 bg-neutral-800 border border-neutral-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100 placeholder:text-neutral-600 transition-all",
+                        hasNoEmail && "opacity-50 cursor-not-allowed"
+                      )}
+                      placeholder={hasNoEmail ? "Auto-generated internal email" : "john@example.com"}
                     />
+                    {hasNoEmail && (
+                      <p className="mt-1.5 text-[10px] text-neutral-500 italic">
+                        An internal email will be generated for this resident.
+                      </p>
+                    )}
                   </div>
                 </div>
                 
@@ -1811,7 +2046,7 @@ function UserManagement({ users, currentUser, isSuperAdmin }: { users: UserProfi
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-800">
-            {users.map(user => (
+            {sortedUsers.map(user => (
               <tr key={user.uid} className="hover:bg-neutral-800/30 transition-colors">
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-3">
@@ -2147,7 +2382,7 @@ function PaymentReport({ accounts, payments, residents }: { accounts: AccountEnt
   const owners = useMemo(() => {
     return residents
       .filter(r => r.role === 'owner')
-      .sort((a, b) => (a.flatNumber || '').localeCompare(b.flatNumber || ''));
+      .sort((a, b) => (a.flatNumber || '').localeCompare(b.flatNumber || '', undefined, { numeric: true, sensitivity: 'base' }));
   }, [residents]);
 
   const paymentMap = useMemo(() => {
@@ -2176,7 +2411,8 @@ function PaymentReport({ accounts, payments, residents }: { accounts: AccountEnt
             amount: acc.displayAmount || 0,
             date: acc.originalPaymentDate?.toDate() || null,
             source: 'Manual (Advance)',
-            particulars: acc.particulars
+            particulars: acc.particulars,
+            period: `${acc.forMonth} ${acc.forYear}`
           });
         }
       } else if (acc.income > 0) {
@@ -2206,7 +2442,8 @@ function PaymentReport({ accounts, payments, residents }: { accounts: AccountEnt
                   amount: monthlyAmount,
                   date: dateObj,
                   source: 'Manual',
-                  particulars: acc.particulars
+                  particulars: acc.particulars,
+                  period: description
                 });
               }
             }
@@ -2222,7 +2459,8 @@ function PaymentReport({ accounts, payments, residents }: { accounts: AccountEnt
               amount: acc.income,
               date: dateObj,
               source: 'Manual',
-              particulars: acc.particulars
+              particulars: acc.particulars,
+              period: description
             });
           } else if (dateObj) {
             // Fallback to payment date if description parsing fails
@@ -2232,7 +2470,8 @@ function PaymentReport({ accounts, payments, residents }: { accounts: AccountEnt
                 amount: acc.income,
                 date: dateObj,
                 source: 'Manual',
-                particulars: acc.particulars
+                particulars: acc.particulars,
+                period: description
               });
             }
           }
@@ -2256,7 +2495,8 @@ function PaymentReport({ accounts, payments, residents }: { accounts: AccountEnt
         amount: p.amount,
         date: dateObj,
         source: 'Online',
-        particulars: `Online Payment - Ref: ${p.transactionId || 'N/A'}`
+        particulars: `Online Payment - Ref: ${p.transactionId || 'N/A'}`,
+        period: format(new Date(p.month + '-01'), 'MMMM yyyy')
       });
     });
 
@@ -2305,10 +2545,12 @@ function PaymentReport({ accounts, payments, residents }: { accounts: AccountEnt
                     const key = `${selectedYear}-${String(i).padStart(2, '0')}`;
                     const isFuture = selectedYear > currentYear || (selectedYear === currentYear && i > currentMonth);
                     const isBeforeStart = selectedYear < SYSTEM_START_YEAR || (selectedYear === SYSTEM_START_YEAR && i < SYSTEM_START_MONTH);
-                    const isCurrentMonth = selectedYear === currentYear && i === currentMonth;
+                    
+                    const dueDate = new Date(selectedYear, i + 1, 10);
+                    const isOverdue = new Date() > dueDate;
                     
                     if (flatMap.has(key)) return "PAID";
-                    if (isFuture || isBeforeStart || isCurrentMonth) return "-";
+                    if (isFuture || isBeforeStart || !isOverdue) return "-";
                     return "PENDING";
                   });
                   return `"${o.displayName}","${o.flatNumber}",` + row.join(",");
@@ -2329,54 +2571,56 @@ function PaymentReport({ accounts, payments, residents }: { accounts: AccountEnt
         </div>
       </div>
 
-      <div className="bg-neutral-900 rounded-3xl border border-neutral-800 overflow-hidden shadow-sm">
+      <div className="bg-neutral-900 rounded-3xl border border-neutral-700 overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-neutral-800/50">
-                <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest border-r border-neutral-800 sticky left-0 bg-neutral-900/95 backdrop-blur-sm z-20">Resident</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-neutral-400 uppercase tracking-widest border-r border-neutral-700 sticky left-0 bg-neutral-900/95 backdrop-blur-sm z-20">Resident</th>
                 {MONTHS.map((month, i) => (
-                  <th key={month} className="px-2 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest text-center border-r border-neutral-800">
+                  <th key={month} className="px-2 py-4 text-[11px] font-black text-neutral-400 uppercase tracking-widest text-center border-r border-neutral-700 bg-neutral-800/30">
                     {month}
                   </th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-neutral-800">
+            <tbody className="divide-y divide-neutral-700">
               {owners.map((owner) => {
                 const flat = owner.flatNumber || '';
                 const flatMap = paymentMap.get(flat) || new Map();
                 
                 return (
                   <tr key={owner.uid} className="hover:bg-neutral-800/30 transition-colors group">
-                    <td className="px-6 py-4 border-r border-neutral-800 sticky left-0 bg-neutral-900/95 backdrop-blur-sm z-10 group-hover:bg-neutral-800/50 transition-colors">
-                      <p className="text-sm font-bold text-neutral-100 truncate max-w-[150px]">{owner.displayName}</p>
-                      <p className="text-[10px] font-bold text-neutral-500">{flat}</p>
+                    <td className="px-6 py-4 border-r border-neutral-700 sticky left-0 bg-neutral-900/95 backdrop-blur-sm z-10 group-hover:bg-neutral-800/50 transition-colors">
+                      <p className="text-sm font-bold text-neutral-100 truncate max-w-[200px]">{owner.displayName} ({flat})</p>
                     </td>
                     {MONTHS.map((_, i) => {
                       const key = `${selectedYear}-${String(i).padStart(2, '0')}`;
                       const payment = flatMap.get(key);
                       const isFuture = selectedYear > currentYear || (selectedYear === currentYear && i > currentMonth);
                       const isBeforeStart = selectedYear < SYSTEM_START_YEAR || (selectedYear === SYSTEM_START_YEAR && i < SYSTEM_START_MONTH);
-                      const isCurrentMonth = selectedYear === currentYear && i === currentMonth;
                       
-                      // A month is pending only if it's NOT paid, NOT in the future, NOT before system start, and NOT the current month
-                      const isPending = !payment && !isFuture && !isBeforeStart && !isCurrentMonth;
+                      // Payment for month M is due by the 10th of month M+1
+                      const dueDate = new Date(selectedYear, i + 1, 10);
+                      const isOverdue = new Date() > dueDate;
+                      
+                      // A month is pending only if it's NOT paid, NOT in the future, NOT before system start, and IS overdue
+                      const isPending = !payment && !isFuture && !isBeforeStart && isOverdue;
                       
                       return (
                         <td 
                           key={i} 
-                          className="p-1 border-r border-neutral-800 relative"
+                          className="p-1 border-r border-neutral-700 relative"
                           onMouseEnter={() => setHoveredCell({ flat, month: i })}
                           onMouseLeave={() => setHoveredCell(null)}
                         >
                           <div className={cn(
                             "w-full aspect-square rounded-lg flex items-center justify-center transition-all duration-300",
-                            payment ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20" : 
-                            isPending ? "bg-rose-500/10 text-rose-500 border border-rose-500/20" : 
-                            "bg-neutral-800/20 text-neutral-700 border border-transparent"
+                            payment ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-[0_0_10px_rgba(16,185,129,0.1)]" : 
+                            isPending ? "bg-rose-500/20 text-rose-400 border border-rose-500/40 shadow-[0_0_10px_rgba(244,63,94,0.1)]" : 
+                            "bg-neutral-800/40 text-neutral-600 border border-neutral-700/30"
                           )}>
-                            {payment ? <Check size={14} strokeWidth={3} /> : isPending ? <AlertCircle size={14} /> : null}
+                            {payment ? <Check size={16} strokeWidth={3} /> : isPending ? <AlertCircle size={16} /> : null}
                           </div>
 
                           <AnimatePresence>
@@ -2411,6 +2655,12 @@ function PaymentReport({ accounts, payments, residents }: { accounts: AccountEnt
                                         <span className="text-[10px] text-neutral-500">Date</span>
                                         <span className="text-xs text-neutral-300">{payment.date ? format(payment.date, 'dd MMM yyyy') : 'N/A'}</span>
                                       </div>
+                                      {payment.period && (
+                                        <div className="flex justify-between items-center">
+                                          <span className="text-[10px] text-neutral-500">Period</span>
+                                          <span className="text-[10px] font-bold text-indigo-400 uppercase">{payment.period}</span>
+                                        </div>
+                                      )}
                                       <div className="pt-1 border-t border-neutral-800">
                                         <p className="text-[9px] text-neutral-500 leading-tight italic">{payment.particulars}</p>
                                       </div>

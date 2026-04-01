@@ -31,6 +31,7 @@ export interface PaymentRecord {
   createdAt: any;
   paidAt?: any;
   isTest?: boolean;
+  particulars?: string;
 }
 
 export interface Announcement {
