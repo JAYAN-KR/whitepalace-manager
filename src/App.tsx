@@ -764,16 +764,30 @@ export default function App() {
   return (
     <ErrorBoundary>
       <Toaster position="top-center" richColors />
-      <div className="min-h-screen bg-neutral-950 flex flex-col md:flex-row">
-      {profile?.mustChangePassword && user && <PasswordChangeOverlay user={user} />}
-      {/* Sidebar */}
-      <aside className="w-full md:w-64 bg-neutral-900 border-b md:border-r border-neutral-800 p-4 flex flex-col gap-2">
-        <div className="flex items-center gap-3 px-2 mb-8">
-          <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-blue-500 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-900/50">
-            <Building2 size={20} />
+      <div className="min-h-screen bg-neutral-950 flex flex-col">
+        {profile?.mustChangePassword && user && <PasswordChangeOverlay user={user} />}
+        
+        {/* Top Header - Full Width */}
+        <header className="w-full py-8 text-center border-b border-neutral-800 bg-neutral-900/30 backdrop-blur-sm z-30">
+          <h1 className="text-4xl md:text-6xl font-black mb-2 tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 via-purple-400 to-blue-400 uppercase">
+            White Palace Appartment
+          </h1>
+          <div className="flex flex-col items-center gap-1">
+            <p className="text-neutral-400 font-medium tracking-wide">Mamppilly Lane, Eroor PO</p>
+            <p className="text-neutral-500 text-sm font-bold tracking-widest uppercase">Tripunithura-682306</p>
           </div>
-          <span className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-blue-400">WhitePalace</span>
-        </div>
+          <div className="mt-6 h-1 w-24 bg-gradient-to-r from-indigo-500 to-blue-500 mx-auto rounded-full opacity-50" />
+        </header>
+
+        <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
+          {/* Sidebar */}
+          <aside className="w-full md:w-64 bg-neutral-900 border-b md:border-r border-neutral-800 p-4 flex flex-col gap-2 overflow-y-auto">
+            <div className="flex items-center gap-3 px-2 mb-8">
+              <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-blue-500 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-900/50">
+                <Building2 size={20} />
+              </div>
+              <span className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-blue-400">WhitePalace</span>
+            </div>
 
         <nav className="flex-1 flex flex-col gap-1">
           <SidebarItem 
@@ -844,18 +858,7 @@ export default function App() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 p-4 md:p-8 overflow-y-auto max-h-screen bg-neutral-950">
-        <div className="mb-12 text-center">
-          <h1 className="text-4xl md:text-6xl font-black mb-2 tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 via-purple-400 to-blue-400 uppercase">
-            White Palace Appartment
-          </h1>
-          <div className="flex flex-col items-center gap-1">
-            <p className="text-neutral-400 font-medium tracking-wide">Mamppilly Lane, Eroor PO</p>
-            <p className="text-neutral-500 text-sm font-bold tracking-widest uppercase">Tripunithura-682306</p>
-          </div>
-          <div className="mt-6 h-1 w-24 bg-gradient-to-r from-indigo-500 to-blue-500 mx-auto rounded-full opacity-50" />
-        </div>
-
+      <main className="flex-1 p-4 md:p-8 overflow-y-auto bg-neutral-950">
         <AnimatePresence mode="wait">
           {activeTab === 'dashboard' && (
             <motion.div 
@@ -935,7 +938,7 @@ export default function App() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
             >
-              <PaymentReport accounts={accounts} payments={payments} residents={allUsers} />
+              <PaymentReport accounts={accounts} payments={payments} residents={allUsers} isSuperAdmin={isSuperAdmin} />
             </motion.div>
           )}
 
@@ -951,6 +954,7 @@ export default function App() {
           )}
         </AnimatePresence>
       </main>
+    </div>
     </div>
     </ErrorBoundary>
   );
@@ -1478,7 +1482,7 @@ function QuickMaintenanceForm({ onClose, onSuccess }: { onClose: () => void, onS
 
         const particulars = `${owner.flatNumber} ${owner.displayName} (${description})`;
 
-        await addDoc(collection(db, 'accounts'), {
+        const mainDocRef = await addDoc(collection(db, 'accounts'), {
           date: Timestamp.fromDate(paymentDate),
           particulars: particulars,
           income: owner.customAmount,
@@ -1490,6 +1494,7 @@ function QuickMaintenanceForm({ onClose, onSuccess }: { onClose: () => void, onS
           forYear: endForYear,
           createdAt: serverTimestamp()
         });
+        const mainId = mainDocRef.id;
 
         // 2. Create/Update PaymentRecord in 'payments' collection for resident dashboard
         for (let i = 0; i < owner.months; i++) {
@@ -1518,7 +1523,8 @@ function QuickMaintenanceForm({ onClose, onSuccess }: { onClose: () => void, onS
             paidAt: serverTimestamp(),
             createdAt: serverTimestamp(),
             transactionId: `MANUAL_${Date.now()}`,
-            particulars: `Manual Entry: ${particulars}`
+            particulars: `Manual Entry: ${particulars}`,
+            parentAccountId: mainId
           }, { merge: true });
 
           // 3. Create shadow entries for future months (Advance Allocation) in 'accounts'
@@ -1537,7 +1543,10 @@ function QuickMaintenanceForm({ onClose, onSuccess }: { onClose: () => void, onS
               originalPaymentDate: Timestamp.fromDate(paymentDate),
               forMonth: currentForMonth,
               forYear: currentForYear,
-              createdAt: serverTimestamp()
+              createdAt: serverTimestamp(),
+              parentAccountId: mainId,
+              ownerUid: owner.uid,
+              flatNumber: owner.flatNumber
             });
           }
         }
@@ -2371,9 +2380,11 @@ function AnnouncementManagement({ announcements, isAdmin, isSuperAdmin, profile 
   );
 }
 
-function PaymentReport({ accounts, payments, residents }: { accounts: AccountEntry[], payments: PaymentRecord[], residents: UserProfile[] }) {
+function PaymentReport({ accounts, payments, residents, isSuperAdmin }: { accounts: AccountEntry[], payments: PaymentRecord[], residents: UserProfile[], isSuperAdmin: boolean }) {
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [hoveredCell, setHoveredCell] = useState<{ flat: string, month: number } | null>(null);
+  const [selectedPayment, setSelectedPayment] = useState<any>(null);
+  const [deletingPayment, setDeletingPayment] = useState(false);
   
   const owners = useMemo(() => {
     return residents
@@ -2404,6 +2415,7 @@ function PaymentReport({ accounts, payments, residents }: { accounts: AccountEnt
         if (monthIdx !== -1) {
           const key = `${acc.forYear}-${String(monthIdx).padStart(2, '0')}`;
           flatMap.set(key, {
+            id: acc.id,
             amount: acc.displayAmount || 0,
             date: acc.originalPaymentDate?.toDate() || null,
             source: 'Manual (Advance)',
@@ -2435,6 +2447,7 @@ function PaymentReport({ accounts, payments, residents }: { accounts: AccountEnt
               // Only set if not already set by a shadow entry (to avoid double counting)
               if (!flatMap.has(key)) {
                 flatMap.set(key, {
+                  id: acc.id,
                   amount: monthlyAmount,
                   date: dateObj,
                   source: 'Manual',
@@ -2452,6 +2465,7 @@ function PaymentReport({ accounts, payments, residents }: { accounts: AccountEnt
           if (mIdx !== -1) {
             const key = `${yearPart}-${String(mIdx).padStart(2, '0')}`;
             flatMap.set(key, {
+              id: acc.id,
               amount: acc.income,
               date: dateObj,
               source: 'Manual',
@@ -2463,6 +2477,7 @@ function PaymentReport({ accounts, payments, residents }: { accounts: AccountEnt
             const key = `${dateObj.getFullYear()}-${String(dateObj.getMonth()).padStart(2, '0')}`;
             if (!flatMap.has(key)) {
               flatMap.set(key, {
+                id: acc.id,
                 amount: acc.income,
                 date: dateObj,
                 source: 'Manual',
@@ -2488,6 +2503,7 @@ function PaymentReport({ accounts, payments, residents }: { accounts: AccountEnt
       const dateObj = p.paidAt instanceof Date ? p.paidAt : p.paidAt?.toDate() || p.createdAt?.toDate();
 
       flatMap.set(key, {
+        id: p.id,
         amount: p.amount,
         date: dateObj,
         source: 'Online',
@@ -2497,7 +2513,23 @@ function PaymentReport({ accounts, payments, residents }: { accounts: AccountEnt
     });
 
     return map;
-  }, [accounts, payments, selectedYear]);
+  }, [accounts, payments]);
+
+  const handleDeletePayment = async () => {
+    if (!selectedPayment || !selectedPayment.id) return;
+    setDeletingPayment(true);
+    try {
+      const collectionName = selectedPayment.source === 'Online' ? 'payments' : 'accounts';
+      await deleteDoc(doc(db, collectionName, selectedPayment.id));
+      toast.success(`${selectedPayment.source === 'Online' ? 'Payment' : 'Account'} record deleted successfully`);
+      setSelectedPayment(null);
+    } catch (err) {
+      console.error("Error deleting record:", err);
+      handleFirestoreError(err, OperationType.DELETE, `${selectedPayment.source === 'Online' ? 'payments' : 'accounts'}/${selectedPayment.id}`);
+    } finally {
+      setDeletingPayment(false);
+    }
+  };
 
   const currentMonth = new Date().getMonth();
   const currentYear = new Date().getFullYear();
@@ -2606,9 +2638,17 @@ function PaymentReport({ accounts, payments, residents }: { accounts: AccountEnt
                       return (
                         <td 
                           key={i} 
-                          className="p-1 border-r border-neutral-700 relative"
+                          className={cn(
+                            "p-1 border-r border-neutral-700 relative",
+                            isSuperAdmin && payment && "cursor-pointer"
+                          )}
                           onMouseEnter={() => setHoveredCell({ flat, month: i })}
                           onMouseLeave={() => setHoveredCell(null)}
+                          onClick={() => {
+                            if (isSuperAdmin && payment) {
+                              setSelectedPayment({ ...payment, flat, monthName: MONTHS[i], year: selectedYear });
+                            }
+                          }}
                         >
                           <div className={cn(
                             "w-full aspect-square rounded-lg flex items-center justify-center transition-all duration-300",
@@ -2684,6 +2724,81 @@ function PaymentReport({ accounts, payments, residents }: { accounts: AccountEnt
           </table>
         </div>
       </div>
+
+      <AnimatePresence>
+        {selectedPayment && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-neutral-900 border border-neutral-700 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl"
+            >
+              <div className="p-6 border-b border-neutral-700 flex items-center justify-between">
+                <h3 className="text-xl font-bold text-white">Payment Details</h3>
+                <button onClick={() => setSelectedPayment(null)} className="text-neutral-400 hover:text-white">
+                  <X size={24} />
+                </button>
+              </div>
+              <div className="p-6 space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">Resident</p>
+                    <p className="text-sm font-bold text-white">{selectedPayment.flat}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">Period</p>
+                    <p className="text-sm font-bold text-white">{selectedPayment.monthName} {selectedPayment.year}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">Amount</p>
+                    <p className="text-sm font-bold text-emerald-400">₹{selectedPayment.amount.toLocaleString()}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">Source</p>
+                    <p className="text-sm font-bold text-indigo-400">{selectedPayment.source}</p>
+                  </div>
+                </div>
+                {selectedPayment.date && (
+                  <div>
+                    <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">Paid On</p>
+                    <p className="text-sm font-bold text-white">
+                      {selectedPayment.date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    </p>
+                  </div>
+                )}
+                {selectedPayment.particulars && (
+                  <div>
+                    <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">Particulars</p>
+                    <p className="text-sm text-neutral-300 italic">{selectedPayment.particulars}</p>
+                  </div>
+                )}
+                
+                <div className="pt-4 border-t border-neutral-800">
+                  <p className="text-xs text-neutral-500 mb-4">
+                    Deleting this record will remove the green tick from the Payment Report. This action cannot be undone.
+                  </p>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setSelectedPayment(null)}
+                      className="flex-1 py-3 bg-neutral-800 hover:bg-neutral-700 text-white rounded-xl font-bold transition-all"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleDeletePayment}
+                      disabled={deletingPayment}
+                      className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-rose-900/20 disabled:opacity-50"
+                    >
+                      {deletingPayment ? 'Deleting...' : 'Delete Record'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -2703,6 +2818,7 @@ function AccountsManagement({ accounts, isAdmin, isSuperAdmin }: { accounts: Acc
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [showQuickModal, setShowQuickModal] = useState(false);
+  const [showOpeningModal, setShowOpeningModal] = useState(false);
   const [editingEntry, setEditingEntry] = useState<AccountEntry | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -2934,7 +3050,7 @@ function AccountsManagement({ accounts, isAdmin, isSuperAdmin }: { accounts: Acc
           openingExpense: newEntry.openingExpense || 0,
           forMonth: newEntry.forMonth || null,
           forYear: newEntry.forYear || null,
-          date: Timestamp.fromDate(newEntry.date as Date)
+          date: newEntry.date instanceof Date ? Timestamp.fromDate(newEntry.date) : newEntry.date as Timestamp
         };
 
         if (editingEntry) {
@@ -2980,17 +3096,105 @@ function AccountsManagement({ accounts, isAdmin, isSuperAdmin }: { accounts: Acc
   const handleDeleteEntry = async () => {
     if (!deletingId) return;
     try {
-      await deleteDoc(doc(db, 'accounts', deletingId));
+      // 1. Get the entry to check if it has associated records
+      const entryRef = doc(db, 'accounts', deletingId);
+      const entrySnap = await getDoc(entryRef);
+      
+      if (entrySnap.exists()) {
+        const data = entrySnap.data();
+        
+        // 2. Delete associated shadow entries in 'accounts' using parentAccountId
+        const qShadow = query(collection(db, 'accounts'), where('parentAccountId', '==', deletingId));
+        const shadowSnap = await getDocs(qShadow);
+        for (const d of shadowSnap.docs) {
+          await deleteDoc(doc(db, 'accounts', d.id));
+        }
+
+        // 3. Delete associated payment records in 'payments' using parentAccountId
+        const qPayments = query(collection(db, 'payments'), where('parentAccountId', '==', deletingId));
+        const paymentsSnap = await getDocs(qPayments);
+        for (const d of paymentsSnap.docs) {
+          await deleteDoc(doc(db, 'payments', d.id));
+        }
+
+        // 4. Heuristic for older entries or shadow entries without parentAccountId
+        if (data.isAdvanceAllocation) {
+          // If it's a shadow entry, find corresponding payment by flat and month
+          const monthIdx = MONTHS.indexOf(data.forMonth);
+          if (monthIdx !== -1) {
+            const monthKey = `${data.forYear}-${String(monthIdx + 1).padStart(2, '0')}`;
+            
+            // Try to find the payment record
+            let qP;
+            if (data.ownerUid && data.flatNumber) {
+              qP = query(collection(db, 'payments'), 
+                where('ownerUid', '==', data.ownerUid), 
+                where('month', '==', monthKey)
+              );
+            } else {
+              // Fallback to searching by month
+              qP = query(collection(db, 'payments'), where('month', '==', monthKey));
+            }
+            
+            const pSnap = await getDocs(qP);
+            for (const d of pSnap.docs) {
+              const pData = d.data() as any;
+              // Only delete if it's a manual payment
+              if (pData.transactionId?.startsWith('MANUAL_')) {
+                // Match by ownerUid or by flat number prefix in particulars
+                if (data.ownerUid && pData.ownerUid === data.ownerUid) {
+                  await deleteDoc(doc(db, 'payments', d.id));
+                } else if (data.particulars.startsWith(pData.flatNumber)) {
+                  await deleteDoc(doc(db, 'payments', d.id));
+                }
+              }
+            }
+          }
+        } else if (data.income > 0 && !data.isOpeningBalance && !data.isWithdrawal) {
+          // If it's a main entry, try to find associated payments by particulars
+          const qP = query(collection(db, 'payments'), where('particulars', '==', `Manual Entry: ${data.particulars}`));
+          const pSnap = await getDocs(qP);
+          for (const d of pSnap.docs) {
+            await deleteDoc(doc(db, 'payments', d.id));
+          }
+
+          // Also try to find shadow entries if they don't have parentAccountId
+          // We can parse the particulars to find the flat number
+          const firstSpaceIdx = data.particulars.indexOf(' ');
+          if (firstSpaceIdx !== -1) {
+            const flat = data.particulars.substring(0, firstSpaceIdx);
+            const qS = query(collection(db, 'accounts'), 
+              where('isAdvanceAllocation', '==', true)
+            );
+            const sSnap = await getDocs(qS);
+            for (const d of sSnap.docs) {
+              const sData = d.data() as any;
+              if (sData.particulars.startsWith(flat) && sData.originalPaymentDate) {
+                const sDate = sData.originalPaymentDate instanceof Date ? sData.originalPaymentDate : sData.originalPaymentDate.toDate();
+                const dDate = data.date instanceof Date ? data.date : data.date?.toDate();
+                if (dDate && sDate.getTime() === dDate.getTime()) {
+                  await deleteDoc(doc(db, 'accounts', d.id));
+                }
+              }
+            }
+          }
+        }
+      }
+
+      await deleteDoc(entryRef);
       setDeletingId(null);
+      toast.success("Transaction deleted successfully");
     } catch (err) {
+      console.error("Error deleting entry:", err);
       handleFirestoreError(err, OperationType.DELETE, `accounts/${deletingId}`);
     }
   };
 
   const handleEditClick = (acc: AccountEntry) => {
     setEditingEntry(acc);
+    const accDate = acc.date instanceof Date ? acc.date : (acc.date as any).toDate();
     setNewEntry({
-      date: acc.date,
+      date: accDate,
       particulars: acc.particulars,
       income: acc.income,
       expense: acc.expense,
@@ -3008,29 +3212,46 @@ function AccountsManagement({ accounts, isAdmin, isSuperAdmin }: { accounts: Acc
     setShowAddModal(true);
   };
 
+  const openingBalances = useMemo(() => {
+    return accounts.filter(acc => acc.isOpeningBalance).sort((a, b) => {
+      const dateA = a.date instanceof Date ? a.date : a.date.toDate();
+      const dateB = b.date instanceof Date ? b.date : b.date.toDate();
+      return dateB.getTime() - dateA.getTime();
+    });
+  }, [accounts]);
+
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 sticky top-0 z-10 bg-neutral-950/80 backdrop-blur-md py-4 border-b border-neutral-700">
-        <div className="bg-neutral-900 p-4 rounded-2xl border border-neutral-700">
-          <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest mb-1">Cash in Hand</p>
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 sticky top-0 z-10 bg-neutral-950 pt-1 pb-4 border-b border-neutral-600">
+        <div className="bg-neutral-900 p-4 rounded-2xl border border-neutral-600 shadow-sm">
+          <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1">Cash in Hand</p>
           <p className="text-2xl font-bold text-emerald-400">₹{balances.grand.cashInHand.toLocaleString()}</p>
         </div>
-        <div className="bg-neutral-900 p-4 rounded-2xl border border-neutral-700">
-          <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest mb-1">Cash in Bank</p>
+        <div className="bg-neutral-900 p-4 rounded-2xl border border-neutral-600 shadow-sm">
+          <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1">Cash in Bank</p>
           <p className="text-2xl font-bold text-blue-400">₹{balances.grand.cashInBank.toLocaleString()}</p>
         </div>
-        <div className="bg-neutral-900 p-4 rounded-2xl border border-neutral-700">
-          <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest mb-1">Total Income</p>
-          <p className="text-2xl font-bold text-indigo-400">₹{balances.grand.income.toLocaleString()}</p>
+        <div className="bg-neutral-900 p-4 rounded-2xl border border-neutral-600 shadow-sm">
+          <div className="flex flex-col">
+            <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1">Total Income</p>
+            <p className="text-2xl font-bold text-indigo-400">₹{balances.grand.income.toLocaleString()}</p>
+            <p className="text-[8px] text-neutral-500 font-bold uppercase mt-1">From 01/05/2025</p>
+          </div>
         </div>
-        <div className="bg-neutral-900 p-4 rounded-2xl border border-neutral-700">
-          <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest mb-1">Total Expense</p>
-          <p className="text-2xl font-bold text-rose-400">₹{balances.grand.expense.toLocaleString()}</p>
+        <div className="bg-neutral-900 p-4 rounded-2xl border border-neutral-600 shadow-sm">
+          <div className="flex flex-col">
+            <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1">Total Expense</p>
+            <p className="text-2xl font-bold text-rose-400">₹{balances.grand.expense.toLocaleString()}</p>
+            <p className="text-[8px] text-neutral-500 font-bold uppercase mt-1">From 01/05/2025</p>
+          </div>
         </div>
       </div>
 
+      {/* Solid rectangle box below tabs */}
+      <div className="h-4 bg-neutral-900 rounded-xl border border-neutral-600 shadow-inner" />
+
       <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
-        <div className="flex items-center gap-2 bg-neutral-900 p-1.5 rounded-2xl border border-neutral-700">
+        <div className="flex items-center gap-2 bg-neutral-900 p-1.5 rounded-2xl border border-neutral-600">
           <select 
             value={selectedYear}
             onChange={(e) => setSelectedYear(Number(e.target.value))}
@@ -3042,16 +3263,16 @@ function AccountsManagement({ accounts, isAdmin, isSuperAdmin }: { accounts: Acc
           </select>
         </div>
 
-        <div className="flex flex-wrap gap-2 p-2 bg-neutral-900 rounded-2xl border border-neutral-700 overflow-x-auto no-scrollbar flex-1">
+        <div className="flex flex-wrap gap-2 p-2 bg-neutral-900 rounded-2xl border border-neutral-600 overflow-x-auto no-scrollbar flex-1">
           {months.map((month, index) => (
             <button
               key={month}
               onClick={() => setSelectedMonth(index)}
               className={cn(
-                "px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap",
+                "px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap border border-transparent",
                 selectedMonth === index 
-                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" 
-                  : "text-neutral-500 hover:text-neutral-300 hover:bg-neutral-800"
+                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20 border-indigo-400" 
+                  : "text-neutral-500 hover:text-neutral-300 hover:bg-neutral-800 hover:border-neutral-700"
               )}
             >
               {month}
@@ -3060,24 +3281,32 @@ function AccountsManagement({ accounts, isAdmin, isSuperAdmin }: { accounts: Acc
         </div>
       </div>
 
-      <div className="bg-neutral-900 rounded-3xl border border-neutral-700 overflow-hidden shadow-sm">
-        <div className="p-6 border-b border-neutral-700 flex items-center justify-between">
+      <div className="bg-neutral-900 rounded-3xl border border-neutral-600 overflow-hidden shadow-sm">
+        <div className="p-6 border-b border-neutral-600 flex items-center justify-between">
           <div>
             <h3 className="text-xl font-bold text-neutral-100">{months[selectedMonth]} {selectedYear} Accounts</h3>
             <p className="text-sm text-neutral-500">Monthly income and expense tracking.</p>
           </div>
-          {isAdmin && isSuperAdmin && (
+          {isSuperAdmin && (
             <div className="flex items-center gap-2">
               <button 
+                onClick={() => setShowOpeningModal(true)}
+                className="flex items-center gap-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 px-4 py-2 rounded-xl font-bold transition-all border border-neutral-700"
+                title="View all opening balances to fix duplicates"
+              >
+                <History size={18} />
+                Opening Balances
+              </button>
+              <button 
                 onClick={() => setShowQuickModal(true)}
-                className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl font-bold transition-all shadow-lg shadow-emerald-900/20"
+                className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl font-bold transition-all shadow-lg shadow-emerald-900/20 border border-emerald-500"
               >
                 <Zap size={18} />
                 Post Maintenance
               </button>
               <button 
                 onClick={() => setShowAddModal(true)}
-                className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl font-bold transition-all shadow-lg shadow-indigo-900/20"
+                className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl font-bold transition-all shadow-lg shadow-indigo-900/20 border border-indigo-500"
               >
                 <Plus size={18} />
                 Add Entry
@@ -3090,16 +3319,16 @@ function AccountsManagement({ accounts, isAdmin, isSuperAdmin }: { accounts: Acc
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-neutral-800/50">
-                <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest border-r border-neutral-700">Date</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest border-r border-neutral-700">Particulars</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest border-r border-neutral-700">For Month</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest border-r border-neutral-700 text-right">Income (₹)</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest border-r border-neutral-700 text-right">Expense (₹)</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest border-r border-neutral-600">Date</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest border-r border-neutral-600">Particulars</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest border-r border-neutral-600">For Month</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest border-r border-neutral-600 text-right">Income (₹)</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest border-r border-neutral-600 text-right">Expense (₹)</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest text-right">Running Balance</th>
                 {isAdmin && isSuperAdmin && <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest text-center">Actions</th>}
               </tr>
             </thead>
-            <tbody className="divide-y divide-neutral-700">
+            <tbody className="divide-y divide-neutral-600">
               {filteredAccounts.length === 0 ? (
                 <tr>
                   <td colSpan={isAdmin && isSuperAdmin ? 7 : 6} className="px-6 py-20 text-center text-neutral-600 italic">
@@ -3112,7 +3341,7 @@ function AccountsManagement({ accounts, isAdmin, isSuperAdmin }: { accounts: Acc
                     "hover:bg-neutral-800/30 transition-colors",
                     acc.isAdvanceAllocation && "bg-yellow-900/5"
                   )}>
-                    <td className="px-6 py-4 border-r border-neutral-700">
+                    <td className="px-6 py-4 border-r border-neutral-600">
                       {!acc.isAdvanceAllocation && acc.date && (
                         <div className="flex items-center gap-2 text-neutral-300 font-medium">
                           <Calendar size={14} className="text-neutral-500" />
@@ -3120,7 +3349,7 @@ function AccountsManagement({ accounts, isAdmin, isSuperAdmin }: { accounts: Acc
                         </div>
                       )}
                     </td>
-                    <td className="px-6 py-4 border-r border-neutral-700">
+                    <td className="px-6 py-4 border-r border-neutral-600">
                       <span className={cn(
                         "text-neutral-300",
                         acc.isAdvanceAllocation && "text-yellow-500/80 italic text-sm"
@@ -3131,7 +3360,7 @@ function AccountsManagement({ accounts, isAdmin, isSuperAdmin }: { accounts: Acc
                       {acc.isWithdrawal && <span className="ml-2 text-[10px] bg-amber-900/30 text-amber-400 px-2 py-0.5 rounded-full font-bold uppercase">Withdrawal</span>}
                       {acc.isOpeningBalance && <span className="ml-2 text-[10px] bg-emerald-900/30 text-emerald-400 px-2 py-0.5 rounded-full font-bold uppercase">Opening Balance</span>}
                     </td>
-                    <td className="px-6 py-4 border-r border-neutral-700 text-center">
+                    <td className="px-6 py-4 border-r border-neutral-600 text-center">
                       {acc.forMonth ? (
                         <div className="flex flex-col items-center gap-1">
                           {!acc.isAdvanceAllocation && (
@@ -3175,7 +3404,7 @@ function AccountsManagement({ accounts, isAdmin, isSuperAdmin }: { accounts: Acc
                         </div>
                       ) : '-'}
                     </td>
-                    <td className="px-6 py-4 border-r border-neutral-700 text-right font-bold">
+                    <td className="px-6 py-4 border-r border-neutral-600 text-right font-bold">
                       {acc.isAdvanceAllocation ? (
                         <span className="text-yellow-500">₹{acc.displayAmount?.toLocaleString()}</span>
                       ) : acc.isOpeningBalance ? (
@@ -3192,7 +3421,7 @@ function AccountsManagement({ accounts, isAdmin, isSuperAdmin }: { accounts: Acc
                         <span className="text-emerald-500">+₹{acc.income.toLocaleString()}</span>
                       ) : '-'}
                     </td>
-                    <td className="px-6 py-4 border-r border-neutral-700 text-right font-bold text-rose-500">
+                    <td className="px-6 py-4 border-r border-neutral-600 text-right font-bold text-rose-500">
                       {acc.expense > 0 ? `-₹${acc.expense.toLocaleString()}` : '-'}
                     </td>
                     <td className="px-6 py-4 text-right font-mono text-neutral-100">
@@ -3228,9 +3457,10 @@ function AccountsManagement({ accounts, isAdmin, isSuperAdmin }: { accounts: Acc
             {filteredAccounts.length > 0 && (
               <tfoot className="bg-neutral-800 font-bold border-t-2 border-neutral-600">
                 <tr>
-                  <td colSpan={2} className="px-6 py-4 text-right text-neutral-400 uppercase tracking-wider text-xs border-r border-neutral-700">Monthly Totals</td>
-                  <td className="px-6 py-4 text-right text-emerald-400 border-r border-neutral-700">₹{monthlyTotals.income.toLocaleString()}</td>
-                  <td className="px-6 py-4 text-right text-rose-400 border-r border-neutral-700">₹{monthlyTotals.expense.toLocaleString()}</td>
+                  <td colSpan={2} className="px-6 py-4 text-right text-neutral-400 uppercase tracking-wider text-xs border-r border-neutral-600">Monthly Totals</td>
+                  <td className="px-6 py-4 border-r border-neutral-600 text-center">-</td>
+                  <td className="px-6 py-4 text-right text-emerald-400 border-r border-neutral-600">₹{monthlyTotals.income.toLocaleString()}</td>
+                  <td className="px-6 py-4 text-right text-rose-400 border-r border-neutral-600">₹{monthlyTotals.expense.toLocaleString()}</td>
                   <td className="px-6 py-4 text-right text-white">₹{balances.monthEnd.cashInHand.toLocaleString()}</td>
                   {isAdmin && isSuperAdmin && <td></td>}
                 </tr>
@@ -3410,7 +3640,17 @@ function AccountsManagement({ accounts, isAdmin, isSuperAdmin }: { accounts: Acc
                   Withdrawal
                 </button>
                 <button
-                  onClick={() => setNewEntry({ ...newEntry, isOpeningBalance: true, isWithdrawal: false, income: 0, expense: 0, particulars: newEntry.particulars || 'Opening Balance' })}
+                  onClick={() => setNewEntry({ 
+                    ...newEntry, 
+                    isOpeningBalance: true, 
+                    isWithdrawal: false, 
+                    income: 0, 
+                    expense: 0, 
+                    particulars: newEntry.particulars || 'Opening Balance',
+                    openingIncome: newEntry.openingIncome || 333990,
+                    openingExpense: newEntry.openingExpense || 280850,
+                    date: new Date(2025, 4, 1) // Default to 1/5/2025
+                  })}
                   className={cn(
                     "flex-1 py-3 rounded-xl font-bold text-[10px] transition-all border uppercase tracking-wider",
                     newEntry.isOpeningBalance
@@ -3523,6 +3763,95 @@ function AccountsManagement({ accounts, isAdmin, isSuperAdmin }: { accounts: Acc
                 className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-rose-900/20"
               >
                 Delete
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {showOpeningModal && (
+        <div className="fixed inset-0 bg-neutral-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-neutral-900 w-full max-w-2xl max-h-[90vh] overflow-y-auto p-8 rounded-3xl shadow-2xl border border-neutral-800"
+          >
+            <div className="flex items-center justify-between mb-8">
+              <div>
+                <h3 className="text-2xl font-bold text-neutral-100">Opening Balances</h3>
+                <p className="text-neutral-500">Manage your initial system balances and historical totals.</p>
+              </div>
+              <button 
+                onClick={() => setShowOpeningModal(false)} 
+                className="text-neutral-500 hover:text-neutral-300"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {openingBalances.length === 0 ? (
+                <div className="p-12 text-center text-neutral-600 italic border-2 border-dashed border-neutral-800 rounded-2xl">
+                  No opening balances found.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {openingBalances.map(acc => (
+                    <div key={acc.id} className="bg-neutral-800/50 p-4 rounded-2xl border border-neutral-700 flex items-center justify-between group">
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-bold text-neutral-200">{acc.particulars}</span>
+                          <span className="text-[10px] bg-emerald-900/30 text-emerald-400 px-2 py-0.5 rounded-full font-bold uppercase">
+                            {acc.method}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-neutral-500 font-medium">
+                          <span>Date: {format(acc.date instanceof Date ? acc.date : acc.date.toDate(), 'dd/MM/yyyy')}</span>
+                          <span className="text-emerald-500">Amount: ₹{acc.amount.toLocaleString()}</span>
+                          {acc.openingIncome > 0 && <span className="text-indigo-400">Income: ₹{acc.openingIncome.toLocaleString()}</span>}
+                          {acc.openingExpense > 0 && <span className="text-rose-400">Expense: ₹{acc.openingExpense.toLocaleString()}</span>}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button 
+                          onClick={() => {
+                            handleEditClick(acc);
+                            setShowOpeningModal(false);
+                          }}
+                          className="p-2 text-neutral-500 hover:text-indigo-400"
+                        >
+                          <Edit2 size={18} />
+                        </button>
+                        <button 
+                          onClick={() => setDeletingId(acc.id)}
+                          className="p-2 text-neutral-500 hover:text-rose-400"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="mt-8 pt-6 border-t border-neutral-800">
+              <button 
+                onClick={() => {
+                  setShowOpeningModal(false);
+                  setShowAddModal(true);
+                  setNewEntry({
+                    ...newEntry,
+                    isOpeningBalance: true,
+                    particulars: 'Opening Balance',
+                    openingIncome: 333990,
+                    openingExpense: 280850,
+                    date: new Date(2025, 4, 1)
+                  });
+                }}
+                className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-emerald-900/20"
+              >
+                Add New Opening Balance
               </button>
             </div>
           </motion.div>

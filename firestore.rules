@@ -53,8 +53,10 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuthenticated() &&
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-          (request.auth.token.email == "jkrsanskrit@gmail.com" && request.auth.token.email_verified == true));
+        (request.auth.token.email == "jkrsanskrit@gmail.com" ||
+         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+          (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'superadmin')));
     }
 
     function isValidUser(data) {
@@ -70,7 +72,8 @@ service cloud.firestore {
              data.ownerUid is string &&
              data.amount is number && data.amount > 0 &&
              data.month is string &&
-             data.status in ['pending', 'paid', 'failed', 'verifying', 'PAID', 'FAILED'];
+             data.status in ['pending', 'paid', 'failed', 'verifying', 'PAID', 'FAILED'] &&
+             (!('parentAccountId' in data) || data.parentAccountId is string);
     }
 
     function isValidAnnouncement(data) {
@@ -91,11 +94,14 @@ service cloud.firestore {
              (!('isAdvanceAllocation' in data) || data.isAdvanceAllocation is bool) &&
              (!('originalPaymentDate' in data) || data.originalPaymentDate is timestamp) &&
              (!('displayAmount' in data) || data.displayAmount is number) &&
-             (!('forMonth' in data) || data.forMonth is string) &&
-             (!('forYear' in data) || data.forYear is number) &&
+             (!('forMonth' in data) || data.forMonth is string || data.forMonth == null) &&
+             (!('forYear' in data) || data.forYear is number || data.forYear == null) &&
              (!('amount' in data) || data.amount is number) &&
              (!('openingIncome' in data) || data.openingIncome is number) &&
              (!('openingExpense' in data) || data.openingExpense is number) &&
+             (!('parentAccountId' in data) || data.parentAccountId is string) &&
+             (!('ownerUid' in data) || data.ownerUid is string) &&
+             (!('flatNumber' in data) || data.flatNumber is string) &&
              (!('createdAt' in data) || data.createdAt is timestamp);
     }
 
