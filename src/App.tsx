@@ -783,15 +783,13 @@ export default function App() {
             label="Dashboard"
             activeColor="indigo"
           />
-          {isAdmin && (
-            <SidebarItem 
-              active={activeTab === 'users'} 
-              onClick={() => setActiveTab('users')}
-              icon={<Users size={20} />}
-              label="Residents"
-              activeColor="emerald"
-            />
-          )}
+          <SidebarItem 
+            active={activeTab === 'users'} 
+            onClick={() => setActiveTab('users')}
+            icon={<Users size={20} />}
+            label="Residents"
+            activeColor="emerald"
+          />
           <SidebarItem 
             active={activeTab === 'announcements'} 
             onClick={() => setActiveTab('announcements')}
@@ -799,24 +797,20 @@ export default function App() {
             label="Announcements"
             activeColor="amber"
           />
-          {isAdmin && (
-            <SidebarItem 
-              active={activeTab === 'accounts'} 
-              onClick={() => setActiveTab('accounts')}
-              icon={<Wallet size={20} />}
-              label="Accounts"
-              activeColor="rose"
-            />
-          )}
-          {isAdmin && (
-            <SidebarItem 
-              active={activeTab === 'ledger'} 
-              onClick={() => setActiveTab('ledger')}
-              icon={<FileText size={20} />}
-              label="Payment Report"
-              activeColor="emerald"
-            />
-          )}
+          <SidebarItem 
+            active={activeTab === 'accounts'} 
+            onClick={() => setActiveTab('accounts')}
+            icon={<Wallet size={20} />}
+            label="Accounts"
+            activeColor="rose"
+          />
+          <SidebarItem 
+            active={activeTab === 'ledger'} 
+            onClick={() => setActiveTab('ledger')}
+            icon={<FileText size={20} />}
+            label="Payment Report"
+            activeColor="emerald"
+          />
           <SidebarItem 
             active={activeTab === 'legal'} 
             onClick={() => setActiveTab('legal')}
@@ -901,14 +895,14 @@ export default function App() {
             </motion.div>
           )}
 
-          {activeTab === 'users' && isAdmin && (
+          {activeTab === 'users' && (
             <motion.div 
               key="users"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
             >
-              <UserManagement users={allUsers} currentUser={profile} isSuperAdmin={isSuperAdmin} />
+              <UserManagement users={allUsers} currentUser={profile} isSuperAdmin={isSuperAdmin} isAdmin={isAdmin} />
             </motion.div>
           )}
 
@@ -923,7 +917,7 @@ export default function App() {
             </motion.div>
           )}
 
-          {activeTab === 'accounts' && isAdmin && (
+          {activeTab === 'accounts' && (
             <motion.div 
               key="accounts"
               initial={{ opacity: 0, y: 10 }}
@@ -934,7 +928,7 @@ export default function App() {
             </motion.div>
           )}
 
-          {activeTab === 'ledger' && isAdmin && (
+          {activeTab === 'ledger' && (
             <motion.div 
               key="ledger"
               initial={{ opacity: 0, y: 10 }}
@@ -1728,7 +1722,7 @@ function StatCard({ label, value, icon, color }: { label: string, value: string,
   );
 }
 
-function UserManagement({ users, currentUser, isSuperAdmin }: { users: UserProfile[], currentUser: UserProfile, isSuperAdmin: boolean }) {
+function UserManagement({ users, currentUser, isSuperAdmin, isAdmin }: { users: UserProfile[], currentUser: UserProfile, isSuperAdmin: boolean, isAdmin: boolean }) {
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   const [flatNumber, setFlatNumber] = useState('');
   const [copying, setCopying] = useState(false);
@@ -1869,7 +1863,7 @@ function UserManagement({ users, currentUser, isSuperAdmin }: { users: UserProfi
           <p className="text-sm text-neutral-500">Manage flat assignments and roles for all residents.</p>
         </div>
         
-        {isSuperAdmin && (
+        {isAdmin && isSuperAdmin && (
           <div className="flex items-center gap-3">
             <button 
               onClick={() => setShowCreate(true)}
@@ -2042,7 +2036,7 @@ function UserManagement({ users, currentUser, isSuperAdmin }: { users: UserProfi
               <th className="px-6 py-4 text-xs font-bold text-neutral-500 uppercase tracking-wider">Resident</th>
               <th className="px-6 py-4 text-xs font-bold text-neutral-500 uppercase tracking-wider">Flat</th>
               <th className="px-6 py-4 text-xs font-bold text-neutral-500 uppercase tracking-wider">Role</th>
-              <th className="px-6 py-4 text-xs font-bold text-neutral-500 uppercase tracking-wider text-right">Actions</th>
+              {isAdmin && <th className="px-6 py-4 text-xs font-bold text-neutral-500 uppercase tracking-wider text-right">Actions</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-800">
@@ -2058,7 +2052,7 @@ function UserManagement({ users, currentUser, isSuperAdmin }: { users: UserProfi
                   </div>
                 </td>
                 <td className="px-6 py-4">
-                  {editingUser?.uid === user.uid ? (
+                  {isAdmin && editingUser?.uid === user.uid ? (
                     <input 
                       type="text" 
                       value={flatNumber} 
@@ -2077,11 +2071,11 @@ function UserManagement({ users, currentUser, isSuperAdmin }: { users: UserProfi
                 </td>
                 <td className="px-6 py-4">
                     <button 
-                      onClick={() => isSuperAdmin && toggleRole(user)}
-                      disabled={!isSuperAdmin}
+                      onClick={() => isAdmin && isSuperAdmin && toggleRole(user)}
+                      disabled={!isAdmin || !isSuperAdmin}
                       className={cn(
                         "text-[10px] font-bold uppercase px-2 py-1 rounded-md transition-all",
-                        isSuperAdmin ? "hover:opacity-80 cursor-pointer" : "cursor-default",
+                        isAdmin && isSuperAdmin ? "hover:opacity-80 cursor-pointer" : "cursor-default",
                         user.role === 'superadmin' ? "bg-amber-900/30 text-amber-400 border border-amber-900/50" :
                         user.role === 'admin' ? "bg-indigo-900/30 text-indigo-400 border border-indigo-900/50" : 
                         "bg-neutral-800 text-neutral-400 border border-neutral-700"
@@ -2090,37 +2084,39 @@ function UserManagement({ users, currentUser, isSuperAdmin }: { users: UserProfi
                       {user.role}
                     </button>
                 </td>
-                <td className="px-6 py-4 text-right">
-                  {isSuperAdmin && (
-                    editingUser?.uid === user.uid ? (
-                      <div className="flex items-center justify-end gap-2">
-                        <button onClick={() => handleUpdateUser(user.uid, user.role)} className="text-emerald-400 hover:text-emerald-300 font-bold text-sm">Save</button>
-                        <button onClick={() => setEditingUser(null)} className="text-neutral-500 hover:text-neutral-400 font-bold text-sm">Cancel</button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center justify-end gap-4">
-                        <button 
-                          onClick={() => {
-                            setEditingUser(user);
-                            setFlatNumber(user.flatNumber || '');
-                          }} 
-                          className="text-neutral-500 hover:text-neutral-100 transition-colors font-medium text-sm"
-                        >
-                          Edit Flat
-                        </button>
-                        {user.uid !== currentUser.uid && (
+                {isAdmin && (
+                  <td className="px-6 py-4 text-right">
+                    {isSuperAdmin && (
+                      editingUser?.uid === user.uid ? (
+                        <div className="flex items-center justify-end gap-2">
+                          <button onClick={() => handleUpdateUser(user.uid, user.role)} className="text-emerald-400 hover:text-emerald-300 font-bold text-sm">Save</button>
+                          <button onClick={() => setEditingUser(null)} className="text-neutral-500 hover:text-neutral-400 font-bold text-sm">Cancel</button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-end gap-4">
                           <button 
-                            onClick={() => setDeletingUser(user)}
-                            className="text-neutral-500 hover:text-red-400 transition-all p-2 hover:bg-red-900/20 rounded-lg group"
-                            title="Delete Resident"
+                            onClick={() => {
+                              setEditingUser(user);
+                              setFlatNumber(user.flatNumber || '');
+                            }} 
+                            className="text-neutral-500 hover:text-neutral-100 transition-colors font-medium text-sm"
                           >
-                            <Trash2 size={16} className="group-hover:scale-110 transition-transform" />
+                            Edit Flat
                           </button>
-                        )}
-                      </div>
-                    )
-                  )}
-                </td>
+                          {user.uid !== currentUser.uid && (
+                            <button 
+                              onClick={() => setDeletingUser(user)}
+                              className="text-neutral-500 hover:text-red-400 transition-all p-2 hover:bg-red-900/20 rounded-lg group"
+                              title="Delete Resident"
+                            >
+                              <Trash2 size={16} className="group-hover:scale-110 transition-transform" />
+                            </button>
+                          )}
+                        </div>
+                      )
+                    )}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -2250,7 +2246,7 @@ function AnnouncementManagement({ announcements, isAdmin, isSuperAdmin, profile 
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-neutral-100">Announcements</h2>
-        {isSuperAdmin && (
+        {isAdmin && (
           <button 
             onClick={() => setShowAddModal(true)}
             className="flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-500 transition-all shadow-lg shadow-indigo-900/20"
@@ -2268,7 +2264,7 @@ function AnnouncementManagement({ announcements, isAdmin, isSuperAdmin, profile 
               <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">
                 {format(ann.createdAt?.toDate() || new Date(), 'MMMM d, yyyy')}
               </span>
-              {isSuperAdmin && (
+              {isAdmin && isSuperAdmin && (
                 <button 
                   onClick={() => handleDelete(ann.id)}
                   className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-500 transition-all"
@@ -3070,7 +3066,7 @@ function AccountsManagement({ accounts, isAdmin, isSuperAdmin }: { accounts: Acc
             <h3 className="text-xl font-bold text-neutral-100">{months[selectedMonth]} {selectedYear} Accounts</h3>
             <p className="text-sm text-neutral-500">Monthly income and expense tracking.</p>
           </div>
-          {isSuperAdmin && (
+          {isAdmin && isSuperAdmin && (
             <div className="flex items-center gap-2">
               <button 
                 onClick={() => setShowQuickModal(true)}
@@ -3100,13 +3096,13 @@ function AccountsManagement({ accounts, isAdmin, isSuperAdmin }: { accounts: Acc
                 <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest border-r border-neutral-700 text-right">Income (₹)</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest border-r border-neutral-700 text-right">Expense (₹)</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest text-right">Running Balance</th>
-                {isSuperAdmin && <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest text-center">Actions</th>}
+                {isAdmin && isSuperAdmin && <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest text-center">Actions</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-700">
               {filteredAccounts.length === 0 ? (
                 <tr>
-                  <td colSpan={isAdmin ? 6 : 5} className="px-6 py-20 text-center text-neutral-600 italic">
+                  <td colSpan={isAdmin && isSuperAdmin ? 7 : 6} className="px-6 py-20 text-center text-neutral-600 italic">
                     No transactions recorded for {months[selectedMonth]} {selectedYear}.
                   </td>
                 </tr>
@@ -3205,7 +3201,7 @@ function AccountsManagement({ accounts, isAdmin, isSuperAdmin }: { accounts: Acc
                         <span className="text-xs text-blue-400">B: ₹{acc.runningBankBalance?.toLocaleString()}</span>
                       </div>
                     </td>
-                    {isSuperAdmin && (
+                    {isAdmin && isSuperAdmin && (
                       <td className="px-6 py-4 text-center">
                         <div className="flex items-center justify-center gap-1">
                           <button 
@@ -3236,7 +3232,7 @@ function AccountsManagement({ accounts, isAdmin, isSuperAdmin }: { accounts: Acc
                   <td className="px-6 py-4 text-right text-emerald-400 border-r border-neutral-700">₹{monthlyTotals.income.toLocaleString()}</td>
                   <td className="px-6 py-4 text-right text-rose-400 border-r border-neutral-700">₹{monthlyTotals.expense.toLocaleString()}</td>
                   <td className="px-6 py-4 text-right text-white">₹{balances.monthEnd.cashInHand.toLocaleString()}</td>
-                  {isSuperAdmin && <td></td>}
+                  {isAdmin && isSuperAdmin && <td></td>}
                 </tr>
               </tfoot>
             )}
