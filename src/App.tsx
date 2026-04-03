@@ -359,7 +359,7 @@ function LegalSection({ onBack }: { onBack?: () => void }) {
 1. Nature of Service: WhitePalace is a digital platform providing apartment management services. 
 2. Delivery Method: No physical shipping is required. Access to the management system is provided instantly via the web application upon successful payment or account activation by the administrator.
 3. Service Availability: The service is available 24/7, subject to planned maintenance or unforeseen technical issues.
-4. Support: For any issues regarding access or delivery of service, please contact the administrator at jkrsanskrit@gmail.com.`
+4. Support: For any issues regarding access or delivery of service, please contact the administrator at whitepalaceapartment@gmail.com.`
     }
   };
 
@@ -493,7 +493,7 @@ function LandingPage({ onLogin, onShowLegal }: { onLogin: () => void, onShowLega
             <button onClick={onShowLegal} className="text-sm font-bold text-neutral-500 hover:text-neutral-100 uppercase tracking-widest transition-colors">Privacy</button>
             <button onClick={onShowLegal} className="text-sm font-bold text-neutral-500 hover:text-neutral-100 uppercase tracking-widest transition-colors">Refunds</button>
           </div>
-          <p className="text-xs text-neutral-500">Contact: jkrsanskrit@gmail.com</p>
+          <p className="text-xs text-neutral-500">Contact: whitepalaceapartment@gmail.com</p>
         </div>
         <p className="text-sm text-neutral-500">© 2026 WhitePalace. All rights reserved.</p>
       </footer>
@@ -588,6 +588,10 @@ export default function App() {
   const [showLegalPublic, setShowLegalPublic] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
 
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [activeTab]);
+
   // Real-time data
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
@@ -649,7 +653,7 @@ export default function App() {
           }
         } else {
           // Default to owner for new users unless it's the bootstrapped admin
-          const isBootstrappedAdmin = firebaseUser.email === 'jkrsanskrit@gmail.com';
+          const isBootstrappedAdmin = firebaseUser.email === 'whitepalaceapartment@gmail.com';
           const newProfile: UserProfile = {
             uid: firebaseUser.uid,
             email: firebaseUser.email || '',
@@ -765,8 +769,13 @@ export default function App() {
     return <LandingPage onLogin={() => setShowLogin(true)} onShowLegal={() => setShowLegalPublic(true)} />;
   }
 
-  const isSuperAdmin = profile.role === 'superadmin' || profile.email === 'jkrsanskrit@gmail.com';
-  const isAdmin = profile.role === 'admin' || profile.role === 'superadmin' || profile.email === 'jkrsanskrit@gmail.com';
+  const isSuperAdmin = profile.role === 'superadmin' || 
+    profile.email === 'whitepalaceapartment@gmail.com' || 
+    profile.email === 'jkrsanskrit@gmail.com';
+  const isAdmin = profile.role === 'admin' || 
+    profile.role === 'superadmin' || 
+    profile.email === 'whitepalaceapartment@gmail.com' || 
+    profile.email === 'jkrsanskrit@gmail.com';
   const isOwner = profile.role === 'owner';
 
   return (
@@ -777,15 +786,21 @@ export default function App() {
         
         {/* Top Header - Full Width */}
         {(!isMobile || activeTab === 'dashboard') && (
-          <header className="w-full py-8 text-center border-b border-neutral-800 bg-neutral-900/30 backdrop-blur-sm z-30">
-            <h1 className="text-4xl md:text-6xl font-black mb-2 tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 via-purple-400 to-blue-400 uppercase">
+          <header className={cn(
+            "w-full text-center border-b border-neutral-800 bg-neutral-900/30 backdrop-blur-sm z-30",
+            isMobile ? "py-4" : "py-8"
+          )}>
+            <h1 className={cn(
+              "font-black tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 via-purple-400 to-blue-400 uppercase",
+              isMobile ? "text-2xl mb-1" : "text-4xl md:text-6xl mb-2"
+            )}>
               White Palace Appartment
             </h1>
             <div className="flex flex-col items-center gap-1">
-              <p className="text-neutral-400 font-medium tracking-wide">Mamppilly Lane, Eroor PO</p>
-              <p className="text-neutral-500 text-sm font-bold tracking-widest uppercase">Tripunithura-682306</p>
+              <p className={cn("text-neutral-400 font-medium tracking-wide", isMobile ? "text-xs" : "text-base")}>Mamppilly Lane, Eroor PO</p>
+              <p className={cn("text-neutral-500 font-bold tracking-widest uppercase", isMobile ? "text-[10px]" : "text-sm")}>Tripunithura-682306</p>
             </div>
-            <div className="mt-6 h-1 w-24 bg-gradient-to-r from-indigo-500 to-blue-500 mx-auto rounded-full opacity-50" />
+            {!isMobile && <div className="mt-6 h-1 w-24 bg-gradient-to-r from-indigo-500 to-blue-500 mx-auto rounded-full opacity-50" />}
           </header>
         )}
 
@@ -848,7 +863,7 @@ export default function App() {
           <div className="mt-auto pt-4 border-t border-neutral-800 flex flex-col gap-4">
             <div className="px-4 py-3 bg-neutral-800/50 rounded-xl border border-neutral-800">
               <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest mb-1">Contact Us</p>
-              <p className="text-xs font-semibold text-neutral-300">jkrsanskrit@gmail.com</p>
+              <p className="text-xs font-semibold text-neutral-300">whitepalaceapartment@gmail.com</p>
               <p className="text-[10px] text-neutral-500">WhitePalace Support</p>
             </div>
             <div className="flex items-center gap-3 px-2">
@@ -965,7 +980,7 @@ export default function App() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
             >
-              <PaymentReport accounts={accounts} payments={payments} residents={allUsers} isSuperAdmin={isSuperAdmin} />
+              <PaymentReport accounts={accounts} payments={payments} residents={allUsers} isAdmin={isAdmin} isSuperAdmin={isSuperAdmin} />
             </motion.div>
           )}
 
@@ -1154,11 +1169,13 @@ function AdminDashboard({ stats, onViewHistory }: { stats: { users: UserProfile[
     });
   }, [stats.accounts]);
 
+  const totalResidents = stats.users.length;
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
       <StatCard 
         label="Total Residents" 
-        value={stats.users.length.toString()} 
+        value={totalResidents.toString()} 
         icon={<Users size={20} />} 
         color="blue" 
       />
@@ -1762,6 +1779,7 @@ function StatCard({ label, value, icon, color }: { label: string, value: string,
 function UserManagement({ users, currentUser, isSuperAdmin, isAdmin }: { users: UserProfile[], currentUser: UserProfile, isSuperAdmin: boolean, isAdmin: boolean }) {
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   const [flatNumber, setFlatNumber] = useState('');
+  const [editName, setEditName] = useState('');
   const [copying, setCopying] = useState(false);
   
   // Create User Form State
@@ -1857,18 +1875,24 @@ function UserManagement({ users, currentUser, isSuperAdmin, isAdmin }: { users: 
   const handleUpdateUser = async (uid: string, currentRole: UserRole) => {
     try {
       await updateDoc(doc(db, 'users', uid), { 
+        displayName: editName,
         flatNumber: flatNumber,
         role: currentRole // Keep role for now, or add role select if needed
       });
       setEditingUser(null);
       setFlatNumber('');
+      setEditName('');
     } catch (error) {
       console.error("Update failed:", error);
     }
   };
 
   const toggleRole = (user: UserProfile) => {
-    const newRole = user.role === 'admin' ? 'owner' : 'admin';
+    let newRole: UserRole = 'owner';
+    if (user.role === 'owner') newRole = 'admin';
+    else if (user.role === 'admin') newRole = 'superadmin';
+    else if (user.role === 'superadmin') newRole = 'owner';
+    
     setConfirmingRoleChange({ user, newRole });
   };
 
@@ -1900,7 +1924,7 @@ function UserManagement({ users, currentUser, isSuperAdmin, isAdmin }: { users: 
           <p className="text-sm text-neutral-500">Manage flat assignments and roles for all residents.</p>
         </div>
         
-        {isAdmin && isSuperAdmin && (
+        {isAdmin && (
           <div className="flex items-center gap-3">
             <button 
               onClick={() => setShowCreate(true)}
@@ -1910,35 +1934,39 @@ function UserManagement({ users, currentUser, isSuperAdmin, isAdmin }: { users: 
               Create Resident
             </button>
 
-            <button 
-              onClick={() => {
-                toast.promise(new Promise(resolve => setTimeout(resolve, 800)), {
-                  loading: 'Syncing residents...',
-                  success: 'Resident list synced successfully',
-                  error: 'Failed to sync residents',
-                });
-              }}
-              className="px-4 py-3 bg-neutral-800 text-neutral-300 rounded-2xl font-bold flex items-center gap-2 hover:bg-neutral-700 transition-all border border-neutral-700"
-            >
-              <RefreshCw size={18} />
-              Sync Residents
-            </button>
-            
-            <div className="bg-neutral-900 p-4 rounded-2xl border border-neutral-800 shadow-sm flex items-center gap-4">
-              <div className="flex flex-col">
-                <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">Invite Residents</span>
-                <span className="text-xs font-mono text-neutral-400 truncate max-w-[150px]">{window.location.origin}</span>
-              </div>
-              <button 
-                onClick={copyLink}
-                className={cn(
-                  "px-4 py-2 rounded-xl text-xs font-bold transition-all",
-                  copying ? "bg-green-900/30 text-green-400" : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
-                )}
-              >
-                {copying ? "Copied!" : "Copy Link"}
-              </button>
-            </div>
+            {isSuperAdmin && (
+              <>
+                <button 
+                  onClick={() => {
+                    toast.promise(new Promise(resolve => setTimeout(resolve, 800)), {
+                      loading: 'Syncing residents...',
+                      success: 'Resident list synced successfully',
+                      error: 'Failed to sync residents',
+                    });
+                  }}
+                  className="px-4 py-3 bg-neutral-800 text-neutral-300 rounded-2xl font-bold flex items-center gap-2 hover:bg-neutral-700 transition-all border border-neutral-700"
+                >
+                  <RefreshCw size={18} />
+                  Sync Residents
+                </button>
+                
+                <div className="bg-neutral-900 p-4 rounded-2xl border border-neutral-800 shadow-sm flex items-center gap-4">
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">Invite Residents</span>
+                    <span className="text-xs font-mono text-neutral-400 truncate max-w-[150px]">{window.location.origin}</span>
+                  </div>
+                  <button 
+                    onClick={copyLink}
+                    className={cn(
+                      "px-4 py-2 rounded-xl text-xs font-bold transition-all",
+                      copying ? "bg-green-900/30 text-green-400" : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
+                    )}
+                  >
+                    {copying ? "Copied!" : "Copy Link"}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -2072,7 +2100,7 @@ function UserManagement({ users, currentUser, isSuperAdmin, isAdmin }: { users: 
             <tr className="bg-neutral-800/50 border-b border-neutral-800">
               <th className="px-6 py-4 text-xs font-bold text-neutral-500 uppercase tracking-wider">Resident</th>
               <th className="px-6 py-4 text-xs font-bold text-neutral-500 uppercase tracking-wider">Flat</th>
-              <th className="px-6 py-4 text-xs font-bold text-neutral-500 uppercase tracking-wider">Role</th>
+              {isSuperAdmin && <th className="px-6 py-4 text-xs font-bold text-neutral-500 uppercase tracking-wider">Role</th>}
               {isAdmin && <th className="px-6 py-4 text-xs font-bold text-neutral-500 uppercase tracking-wider text-right">Actions</th>}
             </tr>
           </thead>
@@ -2083,7 +2111,17 @@ function UserManagement({ users, currentUser, isSuperAdmin, isAdmin }: { users: 
                   <div className="flex items-center gap-3">
                     <img src={user.photoURL} className="w-10 h-10 rounded-full border border-neutral-800" alt="" />
                     <div>
-                      <p className="font-bold text-neutral-100">{user.displayName}</p>
+                      {isAdmin && editingUser?.uid === user.uid ? (
+                        <input 
+                          type="text" 
+                          value={editName} 
+                          onChange={(e) => setEditName(e.target.value)}
+                          placeholder="Full Name"
+                          className="w-full px-3 py-1 bg-neutral-800 border-neutral-700 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100 mb-1"
+                        />
+                      ) : (
+                        <p className="font-bold text-neutral-100">{user.displayName}</p>
+                      )}
                       <p className="text-xs text-neutral-500">{user.email}</p>
                     </div>
                   </div>
@@ -2106,51 +2144,52 @@ function UserManagement({ users, currentUser, isSuperAdmin, isAdmin }: { users: 
                     </span>
                   )}
                 </td>
-                <td className="px-6 py-4">
-                    <button 
-                      onClick={() => isAdmin && isSuperAdmin && toggleRole(user)}
-                      disabled={!isAdmin || !isSuperAdmin}
-                      className={cn(
-                        "text-[10px] font-bold uppercase px-2 py-1 rounded-md transition-all",
-                        isAdmin && isSuperAdmin ? "hover:opacity-80 cursor-pointer" : "cursor-default",
-                        user.role === 'superadmin' ? "bg-amber-900/30 text-amber-400 border border-amber-900/50" :
-                        user.role === 'admin' ? "bg-indigo-900/30 text-indigo-400 border border-indigo-900/50" : 
-                        "bg-neutral-800 text-neutral-400 border border-neutral-700"
-                      )}
-                    >
-                      {user.role}
-                    </button>
-                </td>
+                {isSuperAdmin && (
+                  <td className="px-6 py-4">
+                      <button 
+                        onClick={() => isSuperAdmin && toggleRole(user)}
+                        disabled={!isSuperAdmin}
+                        className={cn(
+                          "text-[10px] font-bold uppercase px-2 py-1 rounded-md transition-all",
+                          isSuperAdmin ? "hover:opacity-80 cursor-pointer" : "cursor-default",
+                          user.role === 'superadmin' ? "bg-amber-900/30 text-amber-400 border border-amber-900/50" :
+                          user.role === 'admin' ? "bg-indigo-900/30 text-indigo-400 border border-indigo-900/50" : 
+                          "bg-neutral-800 text-neutral-400 border border-neutral-700"
+                        )}
+                      >
+                        {user.role === 'superadmin' ? 'Super Admin' : user.role}
+                      </button>
+                  </td>
+                )}
                 {isAdmin && (
                   <td className="px-6 py-4 text-right">
-                    {isSuperAdmin && (
-                      editingUser?.uid === user.uid ? (
-                        <div className="flex items-center justify-end gap-2">
-                          <button onClick={() => handleUpdateUser(user.uid, user.role)} className="text-emerald-400 hover:text-emerald-300 font-bold text-sm">Save</button>
-                          <button onClick={() => setEditingUser(null)} className="text-neutral-500 hover:text-neutral-400 font-bold text-sm">Cancel</button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center justify-end gap-4">
+                    {editingUser?.uid === user.uid ? (
+                      <div className="flex items-center justify-end gap-2">
+                        <button onClick={() => handleUpdateUser(user.uid, user.role)} className="text-emerald-400 hover:text-emerald-300 font-bold text-sm">Save</button>
+                        <button onClick={() => setEditingUser(null)} className="text-neutral-500 hover:text-neutral-400 font-bold text-sm">Cancel</button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-end gap-4">
+                        <button 
+                          onClick={() => {
+                            setEditingUser(user);
+                            setFlatNumber(user.flatNumber || '');
+                            setEditName(user.displayName || '');
+                          }} 
+                          className="text-neutral-500 hover:text-neutral-100 transition-colors font-medium text-sm"
+                        >
+                          Edit Profile
+                        </button>
+                        {isSuperAdmin && user.uid !== currentUser.uid && (
                           <button 
-                            onClick={() => {
-                              setEditingUser(user);
-                              setFlatNumber(user.flatNumber || '');
-                            }} 
-                            className="text-neutral-500 hover:text-neutral-100 transition-colors font-medium text-sm"
+                            onClick={() => setDeletingUser(user)}
+                            className="text-neutral-500 hover:text-red-400 transition-all p-2 hover:bg-red-900/20 rounded-lg group"
+                            title="Delete Resident"
                           >
-                            Edit Flat
+                            <Trash2 size={16} className="group-hover:scale-110 transition-transform" />
                           </button>
-                          {user.uid !== currentUser.uid && (
-                            <button 
-                              onClick={() => setDeletingUser(user)}
-                              className="text-neutral-500 hover:text-red-400 transition-all p-2 hover:bg-red-900/20 rounded-lg group"
-                              title="Delete Resident"
-                            >
-                              <Trash2 size={16} className="group-hover:scale-110 transition-transform" />
-                            </button>
-                          )}
-                        </div>
-                      )
+                        )}
+                      </div>
                     )}
                   </td>
                 )}
@@ -2301,7 +2340,7 @@ function AnnouncementManagement({ announcements, isAdmin, isSuperAdmin, profile 
               <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">
                 {format(ann.createdAt?.toDate() || new Date(), 'MMMM d, yyyy')}
               </span>
-              {isAdmin && isSuperAdmin && (
+              {isSuperAdmin && (
                 <button 
                   onClick={() => handleDelete(ann.id)}
                   className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-500 transition-all"
@@ -2408,7 +2447,7 @@ function AnnouncementManagement({ announcements, isAdmin, isSuperAdmin, profile 
   );
 }
 
-function PaymentReport({ accounts, payments, residents, isSuperAdmin }: { accounts: AccountEntry[], payments: PaymentRecord[], residents: UserProfile[], isSuperAdmin: boolean }) {
+function PaymentReport({ accounts, payments, residents, isAdmin, isSuperAdmin }: { accounts: AccountEntry[], payments: PaymentRecord[], residents: UserProfile[], isAdmin: boolean, isSuperAdmin: boolean }) {
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [hoveredCell, setHoveredCell] = useState<{ flat: string, month: number } | null>(null);
   const [selectedPayment, setSelectedPayment] = useState<any>(null);
@@ -2668,12 +2707,12 @@ function PaymentReport({ accounts, payments, residents, isSuperAdmin }: { accoun
                           key={i} 
                           className={cn(
                             "p-1 border-r border-neutral-700 relative",
-                            isSuperAdmin && payment && "cursor-pointer"
+                            payment && "cursor-pointer"
                           )}
                           onMouseEnter={() => setHoveredCell({ flat, month: i })}
                           onMouseLeave={() => setHoveredCell(null)}
                           onClick={() => {
-                            if (isSuperAdmin && payment) {
+                            if (payment) {
                               setSelectedPayment({ ...payment, flat, monthName: MONTHS[i], year: selectedYear });
                             }
                           }}
@@ -2803,24 +2842,35 @@ function PaymentReport({ accounts, payments, residents, isSuperAdmin }: { accoun
                 )}
                 
                 <div className="pt-4 border-t border-neutral-800">
-                  <p className="text-xs text-neutral-500 mb-4">
-                    Deleting this record will remove the green tick from the Payment Report. This action cannot be undone.
-                  </p>
-                  <div className="flex gap-3">
+                  {isSuperAdmin ? (
+                    <>
+                      <p className="text-xs text-neutral-500 mb-4">
+                        Deleting this record will remove the green tick from the Payment Report. This action cannot be undone.
+                      </p>
+                      <div className="flex gap-3">
+                        <button
+                          onClick={() => setSelectedPayment(null)}
+                          className="flex-1 py-3 bg-neutral-800 hover:bg-neutral-700 text-white rounded-xl font-bold transition-all"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={handleDeletePayment}
+                          disabled={deletingPayment}
+                          className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-rose-900/20 disabled:opacity-50"
+                        >
+                          {deletingPayment ? 'Deleting...' : 'Delete Record'}
+                        </button>
+                      </div>
+                    </>
+                  ) : (
                     <button
                       onClick={() => setSelectedPayment(null)}
-                      className="flex-1 py-3 bg-neutral-800 hover:bg-neutral-700 text-white rounded-xl font-bold transition-all"
+                      className="w-full py-3 bg-neutral-800 hover:bg-neutral-700 text-white rounded-xl font-bold transition-all"
                     >
-                      Cancel
+                      Close
                     </button>
-                    <button
-                      onClick={handleDeletePayment}
-                      disabled={deletingPayment}
-                      className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-rose-900/20 disabled:opacity-50"
-                    >
-                      {deletingPayment ? 'Deleting...' : 'Delete Record'}
-                    </button>
-                  </div>
+                  )}
                 </div>
               </div>
             </motion.div>
@@ -3165,14 +3215,18 @@ function AccountsManagement({ accounts, isAdmin, isSuperAdmin }: { accounts: Acc
             }
             
             const pSnap = await getDocs(qP);
+            const normalizeFlat = (f: string) => f.replace(/^0+/, '').toUpperCase();
             for (const d of pSnap.docs) {
               const pData = d.data() as any;
               // Only delete if it's a manual payment
               if (pData.transactionId?.startsWith('MANUAL_')) {
-                // Match by ownerUid or by flat number prefix in particulars
+                // Match by ownerUid or by normalized flat number
+                const entryFlat = normalizeFlat(data.particulars.split(' ')[0]);
+                const paymentFlat = normalizeFlat(pData.flatNumber);
+                
                 if (data.ownerUid && pData.ownerUid === data.ownerUid) {
                   await deleteDoc(doc(db, 'payments', d.id));
-                } else if (data.particulars.startsWith(pData.flatNumber)) {
+                } else if (entryFlat === paymentFlat) {
                   await deleteDoc(doc(db, 'payments', d.id));
                 }
               }
@@ -3315,16 +3369,18 @@ function AccountsManagement({ accounts, isAdmin, isSuperAdmin }: { accounts: Acc
             <h3 className="text-xl font-bold text-neutral-100">{months[selectedMonth]} {selectedYear} Accounts</h3>
             <p className="text-sm text-neutral-500">Monthly income and expense tracking.</p>
           </div>
-          {isSuperAdmin && (
+          {isAdmin && (
             <div className="flex items-center gap-2">
-              <button 
-                onClick={() => setShowOpeningModal(true)}
-                className="flex items-center gap-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 px-4 py-2 rounded-xl font-bold transition-all border border-neutral-700"
-                title="View all opening balances to fix duplicates"
-              >
-                <History size={18} />
-                Opening Balances
-              </button>
+              {isSuperAdmin && (
+                <button 
+                  onClick={() => setShowOpeningModal(true)}
+                  className="flex items-center gap-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 px-4 py-2 rounded-xl font-bold transition-all border border-neutral-700"
+                  title="View all opening balances to fix duplicates"
+                >
+                  <History size={18} />
+                  Opening Balances
+                </button>
+              )}
               <button 
                 onClick={() => setShowQuickModal(true)}
                 className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl font-bold transition-all shadow-lg shadow-emerald-900/20 border border-emerald-500"
@@ -3353,13 +3409,13 @@ function AccountsManagement({ accounts, isAdmin, isSuperAdmin }: { accounts: Acc
                 <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest border-r border-neutral-600 text-right">Income (₹)</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest border-r border-neutral-600 text-right">Expense (₹)</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest text-right">Running Balance</th>
-                {isAdmin && isSuperAdmin && <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest text-center">Actions</th>}
+                {isSuperAdmin && <th className="px-6 py-4 text-[10px] font-bold text-neutral-500 uppercase tracking-widest text-center">Actions</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-600">
               {filteredAccounts.length === 0 ? (
                 <tr>
-                  <td colSpan={isAdmin && isSuperAdmin ? 7 : 6} className="px-6 py-20 text-center text-neutral-600 italic">
+                  <td colSpan={isSuperAdmin ? 7 : 6} className="px-6 py-20 text-center text-neutral-600 italic">
                     No transactions recorded for {months[selectedMonth]} {selectedYear}.
                   </td>
                 </tr>
@@ -3458,7 +3514,7 @@ function AccountsManagement({ accounts, isAdmin, isSuperAdmin }: { accounts: Acc
                         <span className="text-xs text-blue-400">B: ₹{acc.runningBankBalance?.toLocaleString()}</span>
                       </div>
                     </td>
-                    {isAdmin && isSuperAdmin && (
+                    {isSuperAdmin && (
                       <td className="px-6 py-4 text-center">
                         <div className="flex items-center justify-center gap-1">
                           <button 
@@ -3490,7 +3546,7 @@ function AccountsManagement({ accounts, isAdmin, isSuperAdmin }: { accounts: Acc
                   <td className="px-6 py-4 text-right text-emerald-400 border-r border-neutral-600">₹{monthlyTotals.income.toLocaleString()}</td>
                   <td className="px-6 py-4 text-right text-rose-400 border-r border-neutral-600">₹{monthlyTotals.expense.toLocaleString()}</td>
                   <td className="px-6 py-4 text-right text-white">₹{balances.monthEnd.cashInHand.toLocaleString()}</td>
-                  {isAdmin && isSuperAdmin && <td></td>}
+                  {isSuperAdmin && <td></td>}
                 </tr>
               </tfoot>
             )}
