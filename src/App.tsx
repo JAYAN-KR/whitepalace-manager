@@ -969,7 +969,7 @@ export default function App() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
             >
-              <AccountsManagement accounts={accounts} isAdmin={isAdmin} isSuperAdmin={isSuperAdmin} />
+              <AccountsManagement accounts={accounts} residents={allUsers} payments={payments} isAdmin={isAdmin} isSuperAdmin={isSuperAdmin} />
             </motion.div>
           )}
 
@@ -1138,7 +1138,7 @@ function AdminDashboard({ stats, onViewHistory }: { stats: { users: UserProfile[
     if (!monthKey) return false;
     const [year, month] = monthKey.split('-').map(Number);
     // Payment for month M is due by the 10th of month M+1
-    const dueDate = new Date(year, month, 10); 
+    const dueDate = new Date(year, month, 11); 
     return new Date() > dueDate;
   };
 
@@ -1382,7 +1382,7 @@ function OwnerDashboard({ stats, profile, onViewHistory }: { stats: { payments: 
   );
 }
 
-function QuickMaintenanceForm({ onClose, onSuccess }: { onClose: () => void, onSuccess: () => void }) {
+function QuickMaintenanceForm({ onClose, onSuccess, residents, payments }: { onClose: () => void, onSuccess: () => void, residents: UserProfile[], payments: PaymentRecord[] }) {
   const [date, setDate] = useState(new Date());
   const [amount, setAmount] = useState(1200);
   const [saving, setSaving] = useState(false);
@@ -1399,96 +1399,69 @@ function QuickMaintenanceForm({ onClose, onSuccess }: { onClose: () => void, onS
   };
 
   useEffect(() => {
-    const fetchResidents = async () => {
-      setLoadingResidents(true);
-      try {
-        const q = query(collection(db, 'users'), where('role', '==', 'owner'));
-        const snapshot = await getDocs(q);
-        const current = getCurrentMonth(date);
-        const residents = snapshot.docs.map(doc => ({
-          uid: doc.id,
-          flatNumber: doc.data().flatNumber || doc.data().unitNumber || '?',
-          displayName: doc.data().displayName || 'Unknown',
+    const current = getCurrentMonth(date);
+    // Use provided residents if available, otherwise use fallback
+    const dbResidents = residents
+      .filter(r => r.flatNumber) // Only include those with a flat number
+      .map(r => {
+        const monthKey = `${current.year}-${String(MONTHS.indexOf(current.month) + 1).padStart(2, '0')}`;
+        const alreadyPaid = payments.some(p => p.ownerUid === r.uid && p.month === monthKey && p.status === 'paid');
+        
+        return {
+          uid: r.uid,
+          flatNumber: r.flatNumber || '?',
+          displayName: r.displayName || 'Unknown',
           selected: false,
           customAmount: 1200,
           date: date,
           months: 1,
           forMonth: current.month,
-          forYear: current.year
-        }));
-        
-        if (residents.length > 0) {
-          setOwners(residents.sort((a, b) => a.flatNumber.localeCompare(b.flatNumber, undefined, { numeric: true, sensitivity: 'base' })));
-        } else {
-          // Fallback if no residents found in system yet
-          const fallback = [
-            { flatNumber: 'A1', displayName: 'Renjini' },
-            { flatNumber: 'A2', displayName: 'Deepu' },
-            { flatNumber: 'A3', displayName: 'Sudha Subramaniyan' },
-            { flatNumber: 'B1', displayName: 'Anila Kuruvilla' },
-            { flatNumber: 'B2', displayName: 'Suresh' },
-            { flatNumber: 'B3', displayName: 'Prathap PV' },
-            { flatNumber: 'C1', displayName: 'Jayalakshmi' },
-            { flatNumber: 'C2', displayName: 'Sindhu' },
-            { flatNumber: 'C3', displayName: 'Jayan KR' },
-            { flatNumber: 'D2', displayName: 'Usha G Menon' },
-            { flatNumber: 'D3', displayName: 'Prem Narayanan' },
-            { flatNumber: 'E2', displayName: 'Balachandran' },
-            { flatNumber: 'E3', displayName: 'Vidyashekhar' },
-            { flatNumber: 'F1', displayName: 'MohanaKrishnan' },
-            { flatNumber: 'F2', displayName: 'Sudha Dinaker' },
-            { flatNumber: 'F3', displayName: 'Seema Sreekumar' }
-          ].map(o => ({
-            ...o,
-            uid: '',
-            selected: false,
-            customAmount: 1200,
-            date: new Date(),
-            months: 1,
-            forMonth: current.month,
-            forYear: current.year
-          }));
-          setOwners(fallback);
-        }
-      } catch (err) {
-        console.error("Error fetching residents:", err);
-        toast.error("Failed to load residents.");
-      } finally {
-        setLoadingResidents(false);
-      }
-    };
+          forYear: current.year,
+          alreadyPaid,
+          allowMultiple: false
+        };
+      });
 
-    fetchResidents();
-  }, []);
-
-  const handleSyncFromResidents = async () => {
-    setLoadingResidents(true);
-    try {
-      const q = query(collection(db, 'users'), where('role', '==', 'owner'));
-      const snapshot = await getDocs(q);
-      const current = getCurrentMonth(date);
-      const residents = snapshot.docs.map(doc => ({
-        uid: doc.id,
-        flatNumber: doc.data().flatNumber || doc.data().unitNumber || '?',
-        displayName: doc.data().displayName || 'Unknown',
+    if (dbResidents.length > 0) {
+      setOwners(dbResidents.sort((a, b) => a.flatNumber.localeCompare(b.flatNumber, undefined, { numeric: true, sensitivity: 'base' })));
+    } else {
+      // Fallback if no residents found in system yet
+      const fallback = [
+        { flatNumber: 'A1', displayName: 'Renjini' },
+        { flatNumber: 'A2', displayName: 'Deepu' },
+        { flatNumber: 'A3', displayName: 'Sudha Subramaniyan' },
+        { flatNumber: 'B1', displayName: 'Anila Kuruvilla' },
+        { flatNumber: 'B2', displayName: 'Suresh' },
+        { flatNumber: 'B3', displayName: 'Prathap PV' },
+        { flatNumber: 'C1', displayName: 'Jayalakshmi' },
+        { flatNumber: 'C2', displayName: 'Sindhu' },
+        { flatNumber: 'C3', displayName: 'Jayan KR' },
+        { flatNumber: 'D2', displayName: 'Usha G Menon' },
+        { flatNumber: 'D3', displayName: 'Prem Narayanan' },
+        { flatNumber: 'E2', displayName: 'Balachandran' },
+        { flatNumber: 'E3', displayName: 'Vidyashekhar' },
+        { flatNumber: 'F1', displayName: 'MohanaKrishnan' },
+        { flatNumber: 'F2', displayName: 'Sudha Dinaker' },
+        { flatNumber: 'F3', displayName: 'Seema Sreekumar' }
+      ].map(o => ({
+        ...o,
+        uid: '',
         selected: false,
         customAmount: 1200,
-        date: date,
+        date: new Date(),
         months: 1,
         forMonth: current.month,
         forYear: current.year
       }));
-      if (residents.length > 0) {
-        setOwners(residents.sort((a, b) => a.flatNumber.localeCompare(b.flatNumber, undefined, { numeric: true, sensitivity: 'base' })));
-        toast.success("Resident list updated.");
-      } else {
-        toast.error("No residents found in system.");
-      }
-    } catch (err) {
-      toast.error("Failed to sync residents.");
-    } finally {
-      setLoadingResidents(false);
+      setOwners(fallback);
     }
+    setLoadingResidents(false);
+  }, [residents, date, payments]);
+
+  const handleSyncFromResidents = async () => {
+    // This is now handled by the prop, but we can keep it for manual refresh if needed
+    // or just show a toast that it's synced
+    toast.success("Resident list is synced with the main list.");
   };
 
   const handlePost = async () => {
@@ -1626,24 +1599,35 @@ function QuickMaintenanceForm({ onClose, onSuccess }: { onClose: () => void, onS
         ) : owners.map((owner, idx) => (
           <div key={idx} className={cn(
             "p-3 rounded-2xl border transition-all flex flex-col md:flex-row md:items-center gap-4",
-            owner.selected ? "bg-indigo-900/10 border-indigo-500/20" : "bg-neutral-800/30 border-neutral-700 opacity-40"
+            owner.selected ? "bg-indigo-900/10 border-indigo-500/20" : "bg-neutral-800/30 border-neutral-700",
+            (owner.alreadyPaid && !owner.allowMultiple) && "opacity-40 grayscale"
           )}>
-            <div className="flex items-center gap-3 min-w-[180px]">
+            <div className={cn(
+              "flex items-center gap-3 min-w-[180px]",
+              (owner.alreadyPaid && !owner.allowMultiple) && "pointer-events-none"
+            )}>
               <input 
                 type="checkbox" 
                 checked={owner.selected}
+                disabled={owner.alreadyPaid && !owner.allowMultiple}
                 onChange={() => {
                   const newOwners = [...owners];
                   newOwners[idx].selected = !newOwners[idx].selected;
                   setOwners(newOwners);
                 }}
-                className="w-5 h-5 rounded-lg bg-neutral-700 border-neutral-600 text-indigo-600 focus:ring-indigo-500"
+                className="w-5 h-5 rounded-lg bg-neutral-700 border-neutral-600 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50"
               />
-              <p className="text-sm font-bold text-neutral-100 truncate">{owner.flatNumber} {owner.displayName}</p>
+              <div className="flex flex-col">
+                <p className="text-sm font-bold text-neutral-100 truncate">{owner.flatNumber} {owner.displayName}</p>
+                {owner.alreadyPaid && (
+                  <span className="text-[10px] font-bold text-emerald-400">Already Paid</span>
+                )}
+              </div>
             </div>
             
-            <div className="flex-1 grid grid-cols-4 gap-2">
-              <div className="relative">
+            <div className="flex-1 grid grid-cols-5 gap-2">
+              <div className={cn("relative", (owner.alreadyPaid && !owner.allowMultiple) && "pointer-events-none")}>
+                <label className="text-[8px] text-neutral-500 uppercase absolute -top-4 left-0">Date</label>
                 <input 
                   type="date" 
                   value={format(owner.date, 'yyyy-MM-dd')}
@@ -1655,12 +1639,19 @@ function QuickMaintenanceForm({ onClose, onSuccess }: { onClose: () => void, onS
                   className="w-full px-2 py-2 bg-neutral-800/50 border border-neutral-700 rounded-lg text-[10px] text-neutral-300 focus:ring-1 focus:ring-indigo-500 outline-none"
                 />
               </div>
-              <div className="relative flex gap-1 items-center">
+              <div className={cn("relative flex gap-1 items-center", (owner.alreadyPaid && !owner.allowMultiple) && "pointer-events-none")}>
+                <label className="text-[8px] text-neutral-500 uppercase absolute -top-4 left-0">For Month</label>
                 <select
                   value={owner.forMonth}
                   onChange={(e) => {
                     const newOwners = [...owners];
-                    newOwners[idx].forMonth = e.target.value;
+                    const newMonth = e.target.value;
+                    newOwners[idx].forMonth = newMonth;
+                    
+                    // Re-check paid status
+                    const monthKey = `${newOwners[idx].forYear}-${String(MONTHS.indexOf(newMonth) + 1).padStart(2, '0')}`;
+                    newOwners[idx].alreadyPaid = payments.some(p => p.ownerUid === owner.uid && p.month === monthKey && p.status === 'paid');
+                    
                     setOwners(newOwners);
                   }}
                   className="flex-1 min-w-[45px] px-1 py-2 bg-neutral-800/50 border border-neutral-700 rounded-lg text-[10px] text-neutral-300 focus:ring-1 focus:ring-indigo-500 outline-none"
@@ -1672,13 +1663,20 @@ function QuickMaintenanceForm({ onClose, onSuccess }: { onClose: () => void, onS
                   value={owner.forYear}
                   onChange={(e) => {
                     const newOwners = [...owners];
-                    newOwners[idx].forYear = Number(e.target.value);
+                    const newYear = Number(e.target.value);
+                    newOwners[idx].forYear = newYear;
+
+                    // Re-check paid status
+                    const monthKey = `${newYear}-${String(MONTHS.indexOf(newOwners[idx].forMonth) + 1).padStart(2, '0')}`;
+                    newOwners[idx].alreadyPaid = payments.some(p => p.ownerUid === owner.uid && p.month === monthKey && p.status === 'paid');
+
                     setOwners(newOwners);
                   }}
                   className="w-12 px-1 py-2 bg-neutral-800/50 border border-neutral-700 rounded-lg text-[10px] text-neutral-300 focus:ring-1 focus:ring-indigo-500 outline-none"
                 />
               </div>
-              <div className="relative">
+              <div className={cn("relative", (owner.alreadyPaid && !owner.allowMultiple) && "pointer-events-none")}>
+                <label className="text-[8px] text-neutral-500 uppercase absolute -top-4 left-0">Duration</label>
                 <select
                   value={owner.months}
                   onChange={(e) => {
@@ -1698,7 +1696,8 @@ function QuickMaintenanceForm({ onClose, onSuccess }: { onClose: () => void, onS
                   <option value={12}>1 Year</option>
                 </select>
               </div>
-              <div className="relative">
+              <div className={cn("relative", (owner.alreadyPaid && !owner.allowMultiple) && "pointer-events-none")}>
+                <label className="text-[8px] text-neutral-500 uppercase absolute -top-4 left-0">Amount</label>
                 <span className="absolute left-2 top-1/2 -translate-y-1/2 text-neutral-600 text-[10px]">₹</span>
                 <input 
                   type="number"
@@ -1709,6 +1708,19 @@ function QuickMaintenanceForm({ onClose, onSuccess }: { onClose: () => void, onS
                     setOwners(newOwners);
                   }}
                   className="w-full pl-5 pr-2 py-2 bg-neutral-800/50 border border-neutral-700 rounded-lg text-[10px] font-bold text-emerald-400 focus:ring-1 focus:ring-indigo-500 outline-none"
+                />
+              </div>
+              <div className="relative flex flex-col items-center justify-center gap-1">
+                <label className="text-[8px] text-neutral-500 uppercase">MP</label>
+                <input 
+                  type="checkbox"
+                  checked={owner.allowMultiple}
+                  onChange={() => {
+                    const newOwners = [...owners];
+                    newOwners[idx].allowMultiple = !newOwners[idx].allowMultiple;
+                    setOwners(newOwners);
+                  }}
+                  className="w-4 h-4 rounded bg-neutral-700 border-neutral-600 text-amber-500 focus:ring-amber-500"
                 />
               </div>
             </div>
@@ -2641,7 +2653,7 @@ function PaymentReport({ accounts, payments, residents, isAdmin, isSuperAdmin }:
                     const isFuture = selectedYear > currentYear || (selectedYear === currentYear && i > currentMonth);
                     const isBeforeStart = selectedYear < SYSTEM_START_YEAR || (selectedYear === SYSTEM_START_YEAR && i < SYSTEM_START_MONTH);
                     
-                    const dueDate = new Date(selectedYear, i + 1, 10);
+                    const dueDate = new Date(selectedYear, i + 1, 11);
                     const isOverdue = new Date() > dueDate;
                     
                     if (flatMap.has(key)) return "PAID";
@@ -2696,7 +2708,7 @@ function PaymentReport({ accounts, payments, residents, isAdmin, isSuperAdmin }:
                       const isBeforeStart = selectedYear < SYSTEM_START_YEAR || (selectedYear === SYSTEM_START_YEAR && i < SYSTEM_START_MONTH);
                       
                       // Payment for month M is due by the 10th of month M+1
-                      const dueDate = new Date(selectedYear, i + 1, 10);
+                      const dueDate = new Date(selectedYear, i + 1, 11);
                       const isOverdue = new Date() > dueDate;
                       
                       // A month is pending only if it's NOT paid, NOT in the future, NOT before system start, and IS overdue
@@ -2727,7 +2739,7 @@ function PaymentReport({ accounts, payments, residents, isAdmin, isSuperAdmin }:
                           </div>
 
                           <AnimatePresence>
-                            {hoveredCell?.flat === flat && hoveredCell?.month === i && (
+                            {hoveredCell?.flat === flat && hoveredCell?.month === i && (payment || isPending) && (
                               <motion.div 
                                 initial={{ opacity: 0, scale: 0.9, y: 10 }}
                                 animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -2881,7 +2893,7 @@ function PaymentReport({ accounts, payments, residents, isAdmin, isSuperAdmin }:
   );
 }
 
-function AccountsManagement({ accounts, isAdmin, isSuperAdmin }: { accounts: AccountEntry[], isAdmin: boolean, isSuperAdmin: boolean }) {
+function AccountsManagement({ accounts, residents, payments, isAdmin, isSuperAdmin }: { accounts: AccountEntry[], residents: UserProfile[], payments: PaymentRecord[], isAdmin: boolean, isSuperAdmin: boolean }) {
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   
@@ -3561,7 +3573,7 @@ function AccountsManagement({ accounts, isAdmin, isSuperAdmin }: { accounts: Acc
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-neutral-900 w-full max-w-2xl max-h-[90vh] overflow-y-auto p-8 rounded-3xl shadow-2xl border border-neutral-800"
+              className="bg-neutral-900 w-full max-w-4xl max-h-[90vh] overflow-y-auto p-8 rounded-3xl shadow-2xl border border-neutral-800"
             >
               <div className="flex items-center justify-between mb-6">
                 <div>
@@ -3574,6 +3586,8 @@ function AccountsManagement({ accounts, isAdmin, isSuperAdmin }: { accounts: Acc
               </div>
 
               <QuickMaintenanceForm 
+                residents={residents}
+                payments={payments}
                 onClose={() => setShowQuickModal(false)} 
                 onSuccess={() => {
                   setShowQuickModal(false);
