@@ -4,6 +4,8 @@
   "description": "Comprehensive apartment management platform for WhitePalace residents.",
   "start_url": "/",
   "display": "standalone",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "any",
   "background_color": "#0a0a0a",
   "theme_color": "#4f46e5",
   "icons": [

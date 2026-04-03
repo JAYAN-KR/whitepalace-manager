@@ -62,7 +62,8 @@ import {
   Search,
   Download,
   Check,
-  ChevronLeft
+  ChevronLeft,
+  ArrowLeft
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
@@ -583,6 +584,7 @@ export default function App() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'users' | 'announcements' | 'legal' | 'accounts' | 'ledger'>('dashboard');
+  const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' ? window.innerWidth < 768 : false);
   const [showLegalPublic, setShowLegalPublic] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
 
@@ -591,6 +593,12 @@ export default function App() {
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [accounts, setAccounts] = useState<AccountEntry[]>([]);
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -768,98 +776,117 @@ export default function App() {
         {profile?.mustChangePassword && user && <PasswordChangeOverlay user={user} />}
         
         {/* Top Header - Full Width */}
-        <header className="w-full py-8 text-center border-b border-neutral-800 bg-neutral-900/30 backdrop-blur-sm z-30">
-          <h1 className="text-4xl md:text-6xl font-black mb-2 tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 via-purple-400 to-blue-400 uppercase">
-            White Palace Appartment
-          </h1>
-          <div className="flex flex-col items-center gap-1">
-            <p className="text-neutral-400 font-medium tracking-wide">Mamppilly Lane, Eroor PO</p>
-            <p className="text-neutral-500 text-sm font-bold tracking-widest uppercase">Tripunithura-682306</p>
-          </div>
-          <div className="mt-6 h-1 w-24 bg-gradient-to-r from-indigo-500 to-blue-500 mx-auto rounded-full opacity-50" />
-        </header>
+        {(!isMobile || activeTab === 'dashboard') && (
+          <header className="w-full py-8 text-center border-b border-neutral-800 bg-neutral-900/30 backdrop-blur-sm z-30">
+            <h1 className="text-4xl md:text-6xl font-black mb-2 tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 via-purple-400 to-blue-400 uppercase">
+              White Palace Appartment
+            </h1>
+            <div className="flex flex-col items-center gap-1">
+              <p className="text-neutral-400 font-medium tracking-wide">Mamppilly Lane, Eroor PO</p>
+              <p className="text-neutral-500 text-sm font-bold tracking-widest uppercase">Tripunithura-682306</p>
+            </div>
+            <div className="mt-6 h-1 w-24 bg-gradient-to-r from-indigo-500 to-blue-500 mx-auto rounded-full opacity-50" />
+          </header>
+        )}
 
         <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
           {/* Sidebar */}
-          <aside className="w-full md:w-64 bg-neutral-900 border-b md:border-r border-neutral-800 p-4 flex flex-col gap-2 overflow-y-auto">
-            <div className="flex items-center gap-3 px-2 mb-8">
-              <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-blue-500 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-900/50">
-                <Building2 size={20} />
+          {(!isMobile || activeTab === 'dashboard') && (
+            <aside className="w-full md:w-64 bg-neutral-900 border-b md:border-r border-neutral-800 p-4 flex flex-col gap-2 overflow-y-auto">
+              <div className="flex items-center gap-3 px-2 mb-8">
+                <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-blue-500 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-900/50">
+                  <Building2 size={20} />
+                </div>
+                <span className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-blue-400">WhitePalace</span>
               </div>
-              <span className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-blue-400">WhitePalace</span>
+
+          <nav className="flex-1 flex flex-col gap-1">
+            <SidebarItem 
+              active={activeTab === 'dashboard'} 
+              onClick={() => setActiveTab('dashboard')}
+              icon={<LayoutDashboard size={20} />}
+              label="Dashboard"
+              activeColor="indigo"
+            />
+            <SidebarItem 
+              active={activeTab === 'users'} 
+              onClick={() => setActiveTab('users')}
+              icon={<Users size={20} />}
+              label="Residents"
+              activeColor="emerald"
+            />
+            <SidebarItem 
+              active={activeTab === 'announcements'} 
+              onClick={() => setActiveTab('announcements')}
+              icon={<Megaphone size={20} />}
+              label="Announcements"
+              activeColor="amber"
+            />
+            <SidebarItem 
+              active={activeTab === 'accounts'} 
+              onClick={() => setActiveTab('accounts')}
+              icon={<Wallet size={20} />}
+              label="Accounts"
+              activeColor="rose"
+            />
+            <SidebarItem 
+              active={activeTab === 'ledger'} 
+              onClick={() => setActiveTab('ledger')}
+              icon={<FileText size={20} />}
+              label="Payment Report"
+              activeColor="emerald"
+            />
+            <SidebarItem 
+              active={activeTab === 'legal'} 
+              onClick={() => setActiveTab('legal')}
+              icon={<ShieldCheck size={20} />}
+              label="Legal & Policies"
+              activeColor="slate"
+            />
+          </nav>
+
+          <div className="mt-auto pt-4 border-t border-neutral-800 flex flex-col gap-4">
+            <div className="px-4 py-3 bg-neutral-800/50 rounded-xl border border-neutral-800">
+              <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest mb-1">Contact Us</p>
+              <p className="text-xs font-semibold text-neutral-300">jkrsanskrit@gmail.com</p>
+              <p className="text-[10px] text-neutral-500">WhitePalace Support</p>
             </div>
-
-        <nav className="flex-1 flex flex-col gap-1">
-          <SidebarItem 
-            active={activeTab === 'dashboard'} 
-            onClick={() => setActiveTab('dashboard')}
-            icon={<LayoutDashboard size={20} />}
-            label="Dashboard"
-            activeColor="indigo"
-          />
-          <SidebarItem 
-            active={activeTab === 'users'} 
-            onClick={() => setActiveTab('users')}
-            icon={<Users size={20} />}
-            label="Residents"
-            activeColor="emerald"
-          />
-          <SidebarItem 
-            active={activeTab === 'announcements'} 
-            onClick={() => setActiveTab('announcements')}
-            icon={<Megaphone size={20} />}
-            label="Announcements"
-            activeColor="amber"
-          />
-          <SidebarItem 
-            active={activeTab === 'accounts'} 
-            onClick={() => setActiveTab('accounts')}
-            icon={<Wallet size={20} />}
-            label="Accounts"
-            activeColor="rose"
-          />
-          <SidebarItem 
-            active={activeTab === 'ledger'} 
-            onClick={() => setActiveTab('ledger')}
-            icon={<FileText size={20} />}
-            label="Payment Report"
-            activeColor="emerald"
-          />
-          <SidebarItem 
-            active={activeTab === 'legal'} 
-            onClick={() => setActiveTab('legal')}
-            icon={<ShieldCheck size={20} />}
-            label="Legal & Policies"
-            activeColor="slate"
-          />
-        </nav>
-
-        <div className="mt-auto pt-4 border-t border-neutral-800 flex flex-col gap-4">
-          <div className="px-4 py-3 bg-neutral-800/50 rounded-xl border border-neutral-800">
-            <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest mb-1">Contact Us</p>
-            <p className="text-xs font-semibold text-neutral-300">jkrsanskrit@gmail.com</p>
-            <p className="text-[10px] text-neutral-500">WhitePalace Support</p>
-          </div>
-          <div className="flex items-center gap-3 px-2">
-            <img src={profile.photoURL} className="w-10 h-10 rounded-full border border-neutral-800" alt="Avatar" />
-            <div className="flex flex-col min-w-0">
-              <span className="text-sm font-semibold text-neutral-100 truncate">{profile.displayName}</span>
-              <span className="text-xs text-neutral-500 capitalize">{profile.role} {profile.flatNumber && `• ${profile.flatNumber}`}</span>
+            <div className="flex items-center gap-3 px-2">
+              <img src={profile.photoURL} className="w-10 h-10 rounded-full border border-neutral-800" alt="Avatar" />
+              <div className="flex flex-col min-w-0">
+                <span className="text-sm font-semibold text-neutral-100 truncate">{profile.displayName}</span>
+                <span className="text-xs text-neutral-500 capitalize">{profile.role} {profile.flatNumber && `• ${profile.flatNumber}`}</span>
+              </div>
             </div>
+            <button 
+              onClick={() => signOut(auth)}
+              className="flex items-center gap-3 px-4 py-3 text-neutral-500 hover:text-red-400 hover:bg-red-900/20 rounded-xl transition-all"
+            >
+              <LogOut size={20} />
+              <span className="font-medium">Sign Out</span>
+            </button>
           </div>
-          <button 
-            onClick={() => signOut(auth)}
-            className="flex items-center gap-3 px-4 py-3 text-neutral-500 hover:text-red-400 hover:bg-red-900/20 rounded-xl transition-all"
-          >
-            <LogOut size={20} />
-            <span className="font-medium">Sign Out</span>
-          </button>
-        </div>
-      </aside>
+        </aside>
+        )}
 
-      {/* Main Content */}
-      <main className="flex-1 p-4 md:p-8 overflow-y-auto bg-neutral-950">
-        <AnimatePresence mode="wait">
+        {/* Main Content */}
+        <main className={cn(
+          "flex-1 overflow-y-auto bg-neutral-950",
+          isMobile && activeTab !== 'dashboard' ? "p-0" : "p-4 md:p-8"
+        )}>
+          {isMobile && activeTab !== 'dashboard' && (
+            <div className="sticky top-0 z-50 bg-neutral-900/80 backdrop-blur-md border-b border-neutral-800 p-4 flex items-center gap-4">
+              <button 
+                onClick={() => setActiveTab('dashboard')}
+                className="p-2 hover:bg-neutral-800 rounded-full text-neutral-400 transition-colors"
+              >
+                <ArrowLeft size={24} />
+              </button>
+              <h2 className="text-lg font-bold text-white capitalize">{activeTab.replace('ledger', 'Payment Report')}</h2>
+            </div>
+          )}
+          <div className={cn(isMobile && activeTab !== 'dashboard' ? "p-4" : "")}>
+            <AnimatePresence mode="wait">
           {activeTab === 'dashboard' && (
             <motion.div 
               key="dashboard"
@@ -953,6 +980,7 @@ export default function App() {
             </motion.div>
           )}
         </AnimatePresence>
+        </div>
       </main>
     </div>
     </div>
