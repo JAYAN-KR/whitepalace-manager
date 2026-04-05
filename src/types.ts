@@ -7,10 +7,12 @@ export interface UserProfile {
   photoURL: string;
   role: UserRole;
   flatNumber?: string;
+  phone?: string;
   createdAt: any;
   mustChangePassword?: boolean;
   isPending?: boolean;
   tempPassword?: string;
+  hasNoEmail?: boolean;
 }
 
 export interface PaymentRecord {
@@ -20,7 +22,7 @@ export interface PaymentRecord {
   flatNumber: string;
   amount: number;
   month: string;
-  status: 'pending' | 'paid' | 'failed' | 'verifying';
+  status: 'pending' | 'paid' | 'failed' | 'verifying' | 'PAID' | 'FAILED';
   paymentMethod?: string;
   transactionId?: string;
   razorpayOrderId?: string;
@@ -32,6 +34,10 @@ export interface PaymentRecord {
   paidAt?: any;
   isTest?: boolean;
   particulars?: string;
+  source?: string;
+  parentAccountId?: string;
+  installmentIndex?: number;
+  totalInstallments?: number;
 }
 
 export interface Announcement {
@@ -61,5 +67,18 @@ export interface AccountEntry {
   isAdvanceAllocation?: boolean;
   originalPaymentDate?: any; // Timestamp
   displayAmount?: number;
+  parentAccountId?: string;
+  installmentIndex?: number;
+  totalInstallments?: number;
+  flatNumber?: string;
+  ownerUid?: string;
+  ownerName?: string;
   createdAt: any;
+}
+
+export interface AppConfig {
+  id: string;
+  googleSheetsUrl?: string;
+  lastSyncedAt?: any; // Timestamp
+  updatedAt: any;
 }

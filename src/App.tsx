@@ -24,6 +24,7 @@ import {
   addDoc, 
   updateDoc, 
   deleteDoc,
+  deleteField,
   serverTimestamp,
   Timestamp
 } from 'firebase/firestore';
@@ -40,6 +41,7 @@ import {
   CheckCircle2, 
   Clock, 
   AlertCircle,
+  AlertTriangle,
   ChevronRight,
   User as UserIcon,
   Building2,
@@ -63,7 +65,13 @@ import {
   Download,
   Check,
   ChevronLeft,
-  ArrowLeft
+  ArrowLeft,
+  Settings,
+  Table,
+  Loader2,
+  Contact,
+  Phone,
+  BookOpen
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
@@ -78,7 +86,7 @@ import {
   ResponsiveContainer,
   Cell
 } from 'recharts';
-import { UserProfile, PaymentRecord, Announcement, UserRole, AccountEntry } from './types';
+import { UserProfile, PaymentRecord, Announcement, UserRole, AccountEntry, AppConfig } from './types';
 
 declare global {
   interface Window {
@@ -91,6 +99,81 @@ declare global {
 const MONTHS = [
   'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 
   'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'
+];
+
+// Fallback phone numbers for owners
+const OWNER_PHONE_MAPPING: Record<string, string> = {
+  'A1': '9847448093',
+  'A2': '9901456049',
+  'A3': '8939320997',
+  'B1': '9811693806',
+  'B2': '8879770820',
+  'B3': '9446448010',
+  'C1': '9849647835',
+  'C2': '9846175556',
+  'C3': '7012128339',
+  'D2': '9746701449',
+  'D3': '9567844666',
+  'E2': '9995152729',
+  'E3': '9074733075',
+  'F1': '9495046489',
+  'F2': '8939320997',
+  'F3': '8095874799',
+};
+
+// Tenant details
+const TENANT_MAPPING: Record<string, { name: string, phone: string }> = {
+  'A2': { name: 'Suma', phone: '9526658082' },
+  'C1': { name: 'Anas Manilal', phone: '9539830756' },
+  'E2': { name: 'Praveen', phone: '6282733726' },
+  'E3': { name: 'Samu', phone: '9496335097' },
+  'F1': { name: 'Sankar Narayanan', phone: '9539883546' },
+  'F2': { name: 'Supriya', phone: '9582834968' },
+  'F3': { name: 'Kala', phone: '9745655356' },
+};
+
+const extractFlatNumber = (text: string) => {
+  if (!text) return '';
+  const match = text.match(/^([A-Z])\s*0*(\d+)/i);
+  if (match) {
+    return (match[1] + match[2]).toUpperCase();
+  }
+  return '';
+};
+
+const getTenantName = (text: string) => {
+  const cleanFlat = extractFlatNumber(text);
+  return TENANT_MAPPING[cleanFlat]?.name;
+};
+
+const normalizeFlat = (flat: string | undefined | null) => {
+  if (!flat) return '';
+  const clean = flat.toUpperCase().replace(/\s+/g, '');
+  // Match a letter followed by optional zeros and then numbers (e.g., "A01" -> "A1")
+  const match = clean.match(/^([A-Z])0*(\d+)$/);
+  if (match) {
+    return match[1] + match[2];
+  }
+  return clean;
+};
+
+const ALL_FLATS = [
+  { flat: 'A1', name: 'Renjini' },
+  { flat: 'A2', name: 'Deepu' },
+  { flat: 'A3', name: 'Sudha Subramaniyan' },
+  { flat: 'B1', name: 'Anila Kuruvilla' },
+  { flat: 'B2', name: 'Suresh' },
+  { flat: 'B3', name: 'Prathap PV' },
+  { flat: 'C1', name: 'Jayalakshmi' },
+  { flat: 'C2', name: 'Sindhu' },
+  { flat: 'C3', name: 'Jayan KR' },
+  { flat: 'D2', name: 'Usha G Menon' },
+  { flat: 'D3', name: 'Prem Narayanan' },
+  { flat: 'E2', name: 'Balachandran' },
+  { flat: 'E3', name: 'Vidyashekhar' },
+  { flat: 'F1', name: 'MohanaKrishnan' },
+  { flat: 'F2', name: 'Sudha Dinaker' },
+  { flat: 'F3', name: 'Seema Sreekumar' }
 ];
 
 // --- Components ---
@@ -206,17 +289,35 @@ const LoadingScreen = () => (
 );
 
 const LoginScreen = ({ onShowLegal }: { onShowLegal: () => void }) => {
+  const [loginMode, setLoginMode] = useState<'email' | 'flat'>('flat');
   const [email, setEmail] = useState('');
+  const [flatNumber, setFlatNumber] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleEmailLogin = async (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      let emailToUse = email;
+      
+      if (loginMode === 'flat') {
+        // Find user by flat number
+        const targetFlat = normalizeFlat(flatNumber);
+        if (!targetFlat) throw new Error('Please enter a flat number');
+
+        const allUsersSnap = await getDocs(collection(db, 'users'));
+        const userDoc = allUsersSnap.docs.find(d => normalizeFlat(d.data().flatNumber) === targetFlat);
+        
+        if (!userDoc) {
+          throw new Error('Flat number not found. Please contact admin.');
+        }
+        emailToUse = userDoc.data().email;
+      }
+      
+      await signInWithEmailAndPassword(auth, emailToUse, password);
     } catch (err: any) {
       setError(err.message || 'Login failed');
     } finally {
@@ -230,6 +331,20 @@ const LoginScreen = ({ onShowLegal }: { onShowLegal: () => void }) => {
       await signInWithPopup(auth, provider);
     } catch (error) {
       console.error("Login failed:", error);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    if (!email) {
+      setError('Please enter your email address first.');
+      return;
+    }
+    try {
+      const { sendPasswordResetEmail } = await import('firebase/auth');
+      await sendPasswordResetEmail(auth, email);
+      toast.success('Password reset email sent! Please check your inbox.');
+    } catch (err: any) {
+      setError(err.message || 'Failed to send reset email');
     }
   };
 
@@ -248,18 +363,62 @@ const LoginScreen = ({ onShowLegal }: { onShowLegal: () => void }) => {
         <h1 className="text-3xl font-bold text-center text-neutral-100 mb-2 tracking-tight">WhitePalace</h1>
         <p className="text-center text-neutral-500 mb-8">Manage your apartment maintenance and payments with ease.</p>
         
-        <form onSubmit={handleEmailLogin} className="space-y-4 mb-6">
-          <div>
-            <label className="block text-xs font-bold text-neutral-500 uppercase mb-2">Email</label>
-            <input 
-              type="email" 
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-4 py-3 bg-neutral-800 border border-neutral-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100 placeholder:text-neutral-600"
-              placeholder="resident@example.com"
-            />
+        {loginMode === 'flat' && (
+          <div className="bg-indigo-900/20 border border-indigo-900/30 p-3 rounded-xl mb-6 flex items-start gap-3">
+            <AlertCircle size={18} className="text-indigo-400 shrink-0 mt-0.5" />
+            <p className="text-[10px] text-indigo-300 leading-relaxed">
+              Owners without an email can log in using their <strong>Flat Number</strong> and the password provided by the administrator.
+            </p>
           </div>
+        )}
+        
+        <div className="flex items-center gap-2 p-1 bg-neutral-800 rounded-xl mb-8">
+          <button 
+            onClick={() => setLoginMode('flat')}
+            className={cn(
+              "flex-1 py-2 text-xs font-bold rounded-lg transition-all",
+              loginMode === 'flat' ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "text-neutral-500 hover:text-neutral-300"
+            )}
+          >
+            Flat Number
+          </button>
+          <button 
+            onClick={() => setLoginMode('email')}
+            className={cn(
+              "flex-1 py-2 text-xs font-bold rounded-lg transition-all",
+              loginMode === 'email' ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "text-neutral-500 hover:text-neutral-300"
+            )}
+          >
+            Email Address
+          </button>
+        </div>
+
+        <form onSubmit={handleLogin} className="space-y-4 mb-6">
+          {loginMode === 'flat' ? (
+            <div>
+              <label className="block text-xs font-bold text-neutral-500 uppercase mb-2">Flat Number</label>
+              <input 
+                type="text" 
+                required
+                value={flatNumber}
+                onChange={(e) => setFlatNumber(e.target.value)}
+                className="w-full px-4 py-3 bg-neutral-800 border border-neutral-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100 placeholder:text-neutral-600"
+                placeholder="e.g. A101"
+              />
+            </div>
+          ) : (
+            <div>
+              <label className="block text-xs font-bold text-neutral-500 uppercase mb-2">Email</label>
+              <input 
+                type="email" 
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full px-4 py-3 bg-neutral-800 border border-neutral-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100 placeholder:text-neutral-600"
+                placeholder="resident@example.com"
+              />
+            </div>
+          )}
           <div>
             <label className="block text-xs font-bold text-neutral-500 uppercase mb-2">Password</label>
             <input 
@@ -272,6 +431,19 @@ const LoginScreen = ({ onShowLegal }: { onShowLegal: () => void }) => {
             />
           </div>
           {error && <p className="text-xs text-red-500 font-medium">{error}</p>}
+          
+          {loginMode === 'email' && (
+            <div className="text-right">
+              <button 
+                type="button"
+                onClick={handleForgotPassword}
+                className="text-[10px] font-bold text-indigo-400 hover:text-indigo-300 uppercase tracking-wider"
+              >
+                Forgot Password?
+              </button>
+            </div>
+          )}
+
           <button 
             type="submit"
             disabled={loading}
@@ -311,6 +483,410 @@ const LoginScreen = ({ onShowLegal }: { onShowLegal: () => void }) => {
   );
 };
 
+function PendingList({ payments }: { payments: PaymentRecord[] }) {
+  const currentMonth = new Date().getMonth();
+  const currentYear = new Date().getFullYear();
+  const today = new Date().getDate();
+  
+  const pendingData = useMemo(() => {
+    const data: { flat: string, month: string, year: number, amount: number }[] = [];
+    
+    if (today > 10) {
+      const SYSTEM_START_MONTH = 4;
+      const SYSTEM_START_YEAR = 2025;
+      const checkUntil = new Date(currentYear, currentMonth - 1, 1);
+      
+      ALL_FLATS.forEach(f => {
+        const flat = normalizeFlat(f.flat);
+        const flatPayments = payments.filter(p => normalizeFlat(p.flatNumber) === flat && p.status === 'paid');
+        
+        let iterDate = new Date(SYSTEM_START_YEAR, SYSTEM_START_MONTH, 1);
+        while (iterDate <= checkUntil) {
+          const monthKey = `${iterDate.getFullYear()}-${String(iterDate.getMonth() + 1).padStart(2, '0')}`;
+          if (!flatPayments.some(p => p.month === monthKey)) {
+            data.push({
+              flat: f.flat,
+              month: MONTHS[iterDate.getMonth()],
+              year: iterDate.getFullYear(),
+              amount: 1200
+            });
+          }
+          iterDate.setMonth(iterDate.getMonth() + 1);
+        }
+      });
+    }
+    return data;
+  }, [payments, currentMonth, currentYear, today]);
+
+  const totalPending = pendingData.reduce((acc, p) => acc + p.amount, 0);
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-neutral-100">Pending Dues List</h2>
+          <p className="text-sm text-neutral-500">List of flats with outstanding maintenance payments.</p>
+        </div>
+        <div className="bg-rose-500/10 border border-rose-500/20 px-4 py-2 rounded-2xl">
+          <p className="text-[10px] font-bold text-rose-400 uppercase tracking-widest">Total Outstanding</p>
+          <p className="text-xl font-black text-rose-500">₹{totalPending.toLocaleString()}</p>
+        </div>
+      </div>
+
+      <div className="bg-neutral-900 rounded-3xl border border-neutral-800 overflow-hidden shadow-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-neutral-800/50">
+                <th className="px-6 py-4 text-[10px] font-bold text-neutral-400 uppercase tracking-widest">Flat Number</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-neutral-400 uppercase tracking-widest">Owner Name</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-neutral-400 uppercase tracking-widest">Pending Month</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-neutral-400 uppercase tracking-widest text-right">Amount</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-neutral-800">
+              {pendingData.map((p, i) => {
+                const owner = ALL_FLATS.find(f => f.flat === p.flat)?.name;
+                return (
+                  <tr key={i} className="hover:bg-neutral-800/30 transition-colors">
+                    <td className="px-6 py-4">
+                      <span className="text-sm font-black text-neutral-100">{p.flat}</span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className="text-sm font-bold text-neutral-300">{owner}</span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className="text-xs font-bold text-rose-400 bg-rose-500/10 px-2 py-1 rounded-lg">
+                        {p.month} {p.year}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <span className="text-sm font-black text-neutral-100">₹{p.amount.toLocaleString()}</span>
+                    </td>
+                  </tr>
+                );
+              })}
+              {pendingData.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="px-6 py-12 text-center text-neutral-500 font-medium">
+                    No pending dues found.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SettingsSection({ config, onUpdateConfig, accounts }: { config: AppConfig | null, onUpdateConfig: (url: string, lastSyncedAt?: Date) => Promise<void>, accounts: AccountEntry[] }) {
+  const [sheetsUrl, setSheetsUrl] = useState(config?.googleSheetsUrl || '');
+  const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await onUpdateConfig(sheetsUrl);
+      toast.success("Settings saved successfully");
+    } catch (error) {
+      console.error("Failed to save settings:", error);
+      toast.error("Failed to save settings");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSync = async () => {
+    if (!config?.googleSheetsUrl) {
+      toast.error("Please provide a Google Sheets Webhook URL first");
+      return;
+    }
+    setSyncing(true);
+    if (accounts.length === 0) {
+      toast.error("No account data found to sync");
+      setSyncing(false);
+      return;
+    }
+
+    try {
+      // Calculate summary stats
+      const sorted = [...accounts]
+        .filter(acc => !acc.isAdvanceAllocation && acc.date)
+        .sort((a, b) => {
+          const dateA = a.date instanceof Date ? a.date : a.date.toDate();
+          const dateB = b.date instanceof Date ? b.date : b.date.toDate();
+          return dateA.getTime() - dateB.getTime();
+        });
+
+      let currentCash = 0;
+      let currentBank = 0;
+      let grandIncome = 0;
+      let grandExpense = 0;
+
+      sorted.forEach(acc => {
+        if (acc.isOpeningBalance) {
+          if (acc.method === 'bank') {
+            currentBank += Number(acc.amount || 0);
+          } else {
+            currentCash += Number(acc.amount || 0);
+          }
+          grandIncome += Number(acc.openingIncome || 0);
+          grandExpense += Number(acc.openingExpense || 0);
+        } else if (acc.isWithdrawal) {
+          currentCash += Number(acc.amount || 0);
+          currentBank -= Number(acc.amount || 0);
+        } else {
+          if (acc.method === 'bank') {
+            currentBank += Number(acc.income || 0);
+            currentBank -= Number(acc.expense || 0);
+          } else {
+            currentCash += Number(acc.income || 0);
+            currentCash -= Number(acc.expense || 0);
+          }
+          grandIncome += Number(acc.income || 0);
+          grandExpense += Number(acc.expense || 0);
+        }
+      });
+
+      // Prepare data for sync - handle Firestore Timestamps correctly
+      const data = accounts.map(acc => {
+        let dateStr = 'N/A';
+        if (acc.date) {
+          const d = acc.date instanceof Date ? acc.date : acc.date.toDate();
+          dateStr = d.toLocaleDateString('en-IN'); // Use Indian date format
+        } else if (acc.isAdvanceAllocation) {
+          dateStr = `${acc.forMonth} ${acc.forYear}`;
+        }
+
+        // For opening balances, use the specific opening fields if income/expense are 0
+        const income = acc.isOpeningBalance ? (acc.openingIncome || 0) : (acc.income || 0);
+        const expense = acc.isOpeningBalance ? (acc.openingExpense || 0) : (acc.expense || 0);
+
+        return {
+          id: acc.id, // Include ID for duplicate detection
+          date: dateStr,
+          particulars: acc.particulars || (acc.isOpeningBalance ? 'Opening Balance' : ''),
+          income: income,
+          expense: expense,
+          method: acc.method || '',
+          ownerName: acc.ownerName || '',
+          flatNumber: acc.flatNumber || ''
+        };
+      });
+
+      await fetch(config.googleSheetsUrl, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'sync_accounts',
+          data: data,
+          summary: {
+            cashInHand: currentCash,
+            cashInBank: currentBank,
+            totalIncome: grandIncome,
+            totalExpense: grandExpense
+          }
+        }),
+      });
+
+      // Update last sync time
+      await onUpdateConfig(config.googleSheetsUrl, new Date());
+      toast.success("Sync request sent to Google Sheets");
+    } catch (error) {
+      console.error("Sync failed:", error);
+      toast.error("Failed to sync with Google Sheets");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  return (
+    <div className="space-y-8">
+      <div>
+        <h2 className="text-2xl font-bold text-neutral-100">System Settings</h2>
+        <p className="text-sm text-neutral-500">Configure external integrations and backups.</p>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6">
+        <div className="bg-neutral-900 rounded-3xl border border-neutral-800 p-6 shadow-sm">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 bg-green-500/10 rounded-xl flex items-center justify-center text-green-500">
+              <Table size={20} />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-neutral-100">Google Sheets Backup</h3>
+              <p className="text-xs text-neutral-500">Store account details in a Google Sheet for extra safety.</p>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-2 tracking-widest">Webhook URL (Google Apps Script)</label>
+              <input 
+                type="text" 
+                value={sheetsUrl}
+                onChange={(e) => setSheetsUrl(e.target.value)}
+                placeholder="https://script.google.com/macros/s/.../exec"
+                className="w-full px-4 py-3 bg-neutral-800 border border-neutral-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100 text-sm"
+              />
+              <p className="mt-2 text-[10px] text-neutral-500 leading-relaxed">
+                To use this, create a Google Sheet, go to Extensions &gt; Apps Script, paste the backup script, and deploy as a Web App.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-3 pt-2">
+              <button 
+                onClick={handleSave}
+                disabled={saving}
+                className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-6 py-2.5 rounded-xl font-bold text-sm transition-all shadow-lg shadow-indigo-900/20"
+              >
+                {saving ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
+                Save URL
+              </button>
+              
+              <button 
+                onClick={handleSync}
+                disabled={syncing || !config?.googleSheetsUrl}
+                className="flex items-center gap-2 bg-neutral-800 hover:bg-neutral-700 disabled:opacity-30 text-neutral-200 px-6 py-2.5 rounded-xl font-bold text-sm transition-all border border-neutral-700"
+              >
+                {syncing ? <Loader2 className="animate-spin" size={18} /> : <RefreshCw size={18} />}
+                Sync All Accounts Now
+              </button>
+              
+              {config?.lastSyncedAt && (
+                <div className="flex items-center gap-2 text-[10px] text-neutral-500 font-medium">
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  Last synced: {format(config.lastSyncedAt instanceof Date ? config.lastSyncedAt : config.lastSyncedAt.toDate(), 'PPP p')}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-neutral-900/50 rounded-3xl border border-neutral-800 p-6 border-dashed">
+          <h4 className="text-sm font-bold text-neutral-300 mb-4">How to set up Google Sheets Backup:</h4>
+          <ol className="text-xs text-neutral-500 space-y-3 list-decimal pl-4">
+            <li>Create a new <strong>Google Sheet</strong>.</li>
+            <li>Go to <strong>Extensions &gt; Apps Script</strong>.</li>
+            <li>Paste the following code into the editor:
+              <pre className="mt-2 p-3 bg-neutral-950 rounded-lg text-indigo-400 overflow-x-auto font-mono text-[10px]">
+{`function doPost(e) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheets()[0];
+    var contents = e.postData.contents;
+    var payload = JSON.parse(contents);
+    
+    if (payload.action === 'sync_accounts') {
+      // 1. Update Summary at the top (always rows 1-5)
+      if (payload.summary) {
+        sheet.getRange(1, 1).setValue('SUMMARY STATISTICS').setFontWeight('bold').setFontSize(14).setFontColor('#1a73e8');
+        
+        var stats = [
+          ['Cash in Hand', '₹' + payload.summary.cashInHand.toLocaleString()],
+          ['Cash in Bank', '₹' + payload.summary.cashInBank.toLocaleString()],
+          ['Total Income', '₹' + payload.summary.totalIncome.toLocaleString()],
+          ['Total Expense', '₹' + payload.summary.totalExpense.toLocaleString()]
+        ];
+        
+        var summaryRange = sheet.getRange(2, 1, 4, 2);
+        summaryRange.setValues(stats);
+        summaryRange.setBorder(true, true, true, true, true, true, '#000000', SpreadsheetApp.BorderStyle.SOLID);
+        sheet.getRange(2, 1, 4, 1).setFontWeight('bold').setBackground('#f8f9fa');
+        sheet.getRange(2, 2, 4, 1).setHorizontalAlignment('right').setFontWeight('bold');
+        sheet.getRange(4, 2).setFontColor('#0d9488'); // Income
+        sheet.getRange(5, 2).setFontColor('#e11d48'); // Expense
+      }
+      
+      // 2. Handle Data (Incremental Sync)
+      var headerRow = 7;
+      var headers = ['Date', 'Particulars', 'Income', 'Expense', 'Method', 'Owner', 'Flat', 'ID'];
+      
+      // Ensure headers exist
+      if (sheet.getRange(headerRow, 1).getValue() !== 'Date') {
+        sheet.getRange(headerRow, 1, 1, 8).setValues([headers])
+             .setFontWeight('bold').setBackground('#444444').setFontColor('#ffffff')
+             .setHorizontalAlignment('center').setBorder(true, true, true, true, true, true, '#000000', SpreadsheetApp.BorderStyle.SOLID);
+        sheet.setColumnWidth(8, 1); // Hide ID column
+      }
+      
+      if (payload.data && payload.data.length > 0) {
+        // Get existing IDs from Column H (8)
+        var lastRow = sheet.getLastRow();
+        var existingIds = [];
+        if (lastRow >= headerRow + 1) {
+          existingIds = sheet.getRange(headerRow + 1, 8, lastRow - headerRow, 1).getValues().flat();
+        }
+        
+        // Filter for new entries only
+        var newRows = payload.data.filter(function(row) {
+          return existingIds.indexOf(row.id) === -1;
+        }).map(function(row) {
+          return [
+            row.date, 
+            row.particulars, 
+            row.income, 
+            row.expense, 
+            row.method, 
+            row.ownerName, 
+            row.flatNumber,
+            row.id
+          ];
+        });
+        
+        if (newRows.length > 0) {
+          var startRow = Math.max(lastRow + 1, headerRow + 1);
+          var dataRange = sheet.getRange(startRow, 1, newRows.length, 8);
+          dataRange.setValues(newRows);
+        }
+        
+        // Apply borders and formatting to the ENTIRE data range (A to G)
+        var finalLastRow = sheet.getLastRow();
+        if (finalLastRow > headerRow) {
+          var allDataRange = sheet.getRange(headerRow + 1, 1, finalLastRow - headerRow, 7);
+          allDataRange.setBorder(true, true, true, true, true, true, '#000000', SpreadsheetApp.BorderStyle.SOLID);
+          allDataRange.setVerticalAlignment('middle');
+          
+          // Re-apply number formatting and colors to ensure everything is consistent
+          sheet.getRange(headerRow + 1, 3, finalLastRow - headerRow, 1).setNumberFormat('#,##0').setFontColor('#0d9488').setFontWeight('bold');
+          sheet.getRange(headerRow + 1, 4, finalLastRow - headerRow, 1).setNumberFormat('#,##0').setFontColor('#e11d48').setFontWeight('bold');
+        }
+        
+        sheet.autoResizeColumns(1, 7);
+      }
+      
+      return ContentService.createTextOutput(JSON.stringify({status: 'success', added: newRows ? newRows.length : 0}))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({status: 'error', message: err.toString()}))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}`}
+              </pre>
+            </li>
+            <li><strong>IMPORTANT:</strong> Click the <strong>"Save"</strong> icon, then click <strong>"Run"</strong> once to authorize the script. You will see a popup to grant permissions.</li>
+            <li>Click <strong>Deploy &gt; New Deployment</strong>.</li>
+            <li>Select <strong>Web App</strong>, set "Execute as" to <strong>Me</strong>, and "Who has access" to <strong>Anyone</strong>.
+              <p className="mt-1 text-[9px] text-amber-500 font-medium italic">
+                Note: "Anyone" is safe here because the URL is kept secret and only accessible to Admins within this app. The Google Sheet itself remains private to you.
+              </p>
+            </li>
+            <li>Copy the <strong>Web App URL</strong> and paste it above.</li>
+            <li className="text-amber-500 font-bold italic">If you update the code later, you MUST create a "New Deployment" for the changes to take effect.</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function LegalSection({ onBack }: { onBack?: () => void }) {
   const [activeLegalTab, setActiveLegalTab] = useState<'terms' | 'privacy' | 'refund' | 'shipping'>('terms');
 
@@ -323,7 +899,7 @@ function LegalSection({ onBack }: { onBack?: () => void }) {
 1. Acceptance of Terms: By accessing or using WhitePalace, you agree to be bound by these Terms of Service.
 2. Description of Service: WhitePalace provides a platform for apartment maintenance management and payment processing.
 3. User Responsibilities: Users are responsible for maintaining the confidentiality of their account information and for all activities that occur under their account.
-4. Maintenance Payments: Residents agree to pay maintenance dues as specified by the Apartment Association. Late payments may incur penalties as decided by the committee.
+4. Maintenance Payments: Owners agree to pay maintenance dues as specified by the Apartment Association. Late payments may incur penalties as decided by the committee.
 5. Prohibited Conduct: Users may not use the service for any illegal or unauthorized purpose.
 6. Termination: We reserve the right to terminate or suspend access to our service immediately, without prior notice, for any reason whatsoever.
 7. Governing Law: These terms shall be governed by the laws of India.`
@@ -347,7 +923,7 @@ function LegalSection({ onBack }: { onBack?: () => void }) {
 
 1. Maintenance Payments: Maintenance dues once paid are generally non-refundable as they are used for the ongoing upkeep of the apartment complex.
 2. Duplicate Payments: In case of duplicate payments made due to technical errors, the extra amount will be adjusted against the next month's maintenance dues.
-3. Cancellation: Residents cannot "cancel" a maintenance payment once it has been successfully processed.
+3. Cancellation: Owners cannot "cancel" a maintenance payment once it has been successfully processed.
 4. Disputes: Any disputes regarding the amount charged should be raised with the Apartment Association Treasurer within 7 days of payment.
 5. Processing Time: Approved adjustments or refunds (in exceptional cases) will be processed within 7-10 working days.`
     },
@@ -442,7 +1018,7 @@ function LandingPage({ onLogin, onShowLegal }: { onLogin: () => void, onShowLega
               onClick={onLogin}
               className="px-8 py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-500 transition-all shadow-lg shadow-indigo-900/20"
             >
-              Access Resident Portal
+              Access Owner Portal
             </button>
             <button 
               onClick={onShowLegal}
@@ -475,7 +1051,7 @@ function LandingPage({ onLogin, onShowLegal }: { onLogin: () => void, onShowLega
             <LayoutDashboard size={24} />
           </div>
           <h3 className="text-xl font-bold text-neutral-100 mb-3">Admin Dashboard</h3>
-          <p className="text-neutral-500 leading-relaxed">Comprehensive tools for committee members to track dues and manage resident data efficiently.</p>
+          <p className="text-neutral-500 leading-relaxed">Comprehensive tools for committee members to track dues and manage owner data efficiently.</p>
         </div>
       </div>
 
@@ -522,7 +1098,8 @@ const PasswordChangeOverlay = ({ user }: { user: FirebaseUser }) => {
     try {
       await updatePassword(user, newPassword);
       await updateDoc(doc(db, 'users', user.uid), {
-        mustChangePassword: false
+        mustChangePassword: false,
+        tempPassword: deleteField() // Clear the temp password from Firestore
       });
       window.location.reload(); // Refresh to clear state
     } catch (err: any) {
@@ -583,10 +1160,12 @@ export default function App() {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'users' | 'announcements' | 'legal' | 'accounts' | 'ledger'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'users' | 'announcements' | 'legal' | 'accounts' | 'ledger' | 'settings' | 'directory' | 'pending'>('dashboard');
   const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' ? window.innerWidth < 768 : false);
   const [showLegalPublic, setShowLegalPublic] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
+  
+  const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -652,18 +1231,52 @@ export default function App() {
             cleanup();
           }
         } else {
-          // Default to owner for new users unless it's the bootstrapped admin
-          const isBootstrappedAdmin = firebaseUser.email === 'whitepalaceapartment@gmail.com';
-          const newProfile: UserProfile = {
-            uid: firebaseUser.uid,
-            email: firebaseUser.email || '',
-            displayName: firebaseUser.displayName || 'User',
-            photoURL: firebaseUser.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(firebaseUser.displayName || 'User')}&background=random`,
-            role: isBootstrappedAdmin ? 'superadmin' : 'owner',
-            createdAt: serverTimestamp()
-          };
-          await setDoc(doc(db, 'users', firebaseUser.uid), newProfile);
-          setProfile(newProfile);
+          // Check if this email is already registered in the system (added by admin)
+          const q = query(collection(db, 'users'), where('email', '==', firebaseUser.email));
+          const querySnapshot = await getDocs(q);
+          
+          if (!querySnapshot.empty) {
+            // User exists with this email but different UID (e.g. added via email/pass, now using Google)
+            const existingDoc = querySnapshot.docs[0];
+            const existingData = existingDoc.data() as UserProfile;
+            
+            // Update the existing document with the new UID or link them
+            const updatedProfile = {
+              ...existingData,
+              uid: firebaseUser.uid,
+              photoURL: firebaseUser.photoURL || existingData.photoURL,
+              displayName: firebaseUser.displayName || existingData.displayName
+            };
+            
+            await setDoc(doc(db, 'users', firebaseUser.uid), updatedProfile);
+            // Optionally delete the old doc if the UID changed, but usually we just want to allow them in
+            if (existingDoc.id !== firebaseUser.uid) {
+              await deleteDoc(doc(db, 'users', existingDoc.id));
+            }
+            setProfile(updatedProfile);
+          } else {
+            // Default to owner for new users ONLY if it's the bootstrapped admin
+            const isBootstrappedAdmin = firebaseUser.email === 'whitepalaceapartment@gmail.com';
+            
+            if (isBootstrappedAdmin) {
+              const newProfile: UserProfile = {
+                uid: firebaseUser.uid,
+                email: firebaseUser.email || '',
+                displayName: firebaseUser.displayName || 'Admin',
+                photoURL: firebaseUser.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(firebaseUser.displayName || 'Admin')}&background=random`,
+                role: 'superadmin',
+                createdAt: serverTimestamp()
+              };
+              await setDoc(doc(db, 'users', firebaseUser.uid), newProfile);
+              setProfile(newProfile);
+            } else {
+              // UNAUTHORIZED USER
+              toast.error("Unauthorized access. Please contact the administrator to add your email to the system.");
+              await signOut(auth);
+              setUser(null);
+              setProfile(null);
+            }
+          }
         }
       } else {
         setUser(null);
@@ -708,8 +1321,13 @@ export default function App() {
 
     let unsubPayments = () => {};
     let unsubUsers = () => {};
+    let unsubConfig = () => {};
 
-    if (profile.role === 'admin' || profile.role === 'superadmin') {
+    const isAdminUser = profile.role === 'admin' || 
+      profile.role === 'superadmin' || 
+      profile.email === 'whitepalaceapartment@gmail.com';
+
+    if (isAdminUser || profile.role === 'owner') {
       const qPayments = query(collection(db, 'payments'), orderBy('createdAt', 'desc'));
       unsubPayments = onSnapshot(qPayments, (snapshot) => {
         const allPayments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PaymentRecord));
@@ -731,6 +1349,14 @@ export default function App() {
       unsubUsers = onSnapshot(qUsers, (snapshot) => {
         setAllUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as unknown as UserProfile)));
       });
+
+      if (isAdminUser) {
+        unsubConfig = onSnapshot(doc(db, 'config', 'app'), (snapshot) => {
+          if (snapshot.exists()) {
+            setAppConfig({ id: snapshot.id, ...snapshot.data() } as AppConfig);
+          }
+        });
+      }
     } else if (profile.flatNumber) {
       const qPayments = query(
         collection(db, 'payments'), 
@@ -747,8 +1373,25 @@ export default function App() {
       unsubAccounts();
       unsubPayments();
       unsubUsers();
+      unsubConfig();
     };
   }, [profile]);
+
+  const handleUpdateConfig = async (url: string, lastSyncedAt?: Date) => {
+    try {
+      const data: any = {
+        googleSheetsUrl: url,
+        updatedAt: serverTimestamp()
+      };
+      if (lastSyncedAt) {
+        data.lastSyncedAt = lastSyncedAt;
+      }
+      await setDoc(doc(db, 'config', 'app'), data, { merge: true });
+    } catch (error) {
+      console.error("Failed to update config:", error);
+      throw error;
+    }
+  };
 
   if (loading) return <LoadingScreen />;
   
@@ -770,12 +1413,10 @@ export default function App() {
   }
 
   const isSuperAdmin = profile.role === 'superadmin' || 
-    profile.email === 'whitepalaceapartment@gmail.com' || 
-    profile.email === 'jkrsanskrit@gmail.com';
+    profile.email === 'whitepalaceapartment@gmail.com';
   const isAdmin = profile.role === 'admin' || 
     profile.role === 'superadmin' || 
-    profile.email === 'whitepalaceapartment@gmail.com' || 
-    profile.email === 'jkrsanskrit@gmail.com';
+    profile.email === 'whitepalaceapartment@gmail.com';
   const isOwner = profile.role === 'owner';
 
   return (
@@ -786,22 +1427,25 @@ export default function App() {
         
         {/* Top Header - Full Width */}
         {(!isMobile || activeTab === 'dashboard') && (
-          <header className={cn(
-            "w-full text-center border-b border-neutral-800 bg-neutral-900/30 backdrop-blur-sm z-30",
-            isMobile ? "py-4" : "py-8"
-          )}>
-            <h1 className={cn(
-              "font-black tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 via-purple-400 to-blue-400 uppercase",
-              isMobile ? "text-2xl mb-1" : "text-4xl md:text-6xl mb-2"
+          <>
+            <header className={cn(
+              "w-full text-center border-b border-neutral-800 bg-neutral-900/30 backdrop-blur-sm z-30",
+              isMobile ? "py-4" : "py-8"
             )}>
-              White Palace Appartment
-            </h1>
-            <div className="flex flex-col items-center gap-1">
-              <p className={cn("text-neutral-400 font-medium tracking-wide", isMobile ? "text-xs" : "text-base")}>Mamppilly Lane, Eroor PO</p>
-              <p className={cn("text-neutral-500 font-bold tracking-widest uppercase", isMobile ? "text-[10px]" : "text-sm")}>Tripunithura-682306</p>
-            </div>
-            {!isMobile && <div className="mt-6 h-1 w-24 bg-gradient-to-r from-indigo-500 to-blue-500 mx-auto rounded-full opacity-50" />}
-          </header>
+              <h1 className={cn(
+                "font-black tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 via-purple-400 to-blue-400 uppercase",
+                isMobile ? "text-2xl mb-1" : "text-4xl md:text-6xl mb-2"
+              )}>
+                White Palace Appartment
+              </h1>
+              <div className="flex flex-col items-center gap-1">
+                <p className={cn("text-neutral-400 font-medium tracking-wide", isMobile ? "text-xs" : "text-base")}>Mamppilly Lane, Eroor PO</p>
+                <p className={cn("text-neutral-500 font-bold tracking-widest uppercase", isMobile ? "text-[10px]" : "text-sm")}>Tripunithura-682306</p>
+              </div>
+              {!isMobile && <div className="mt-6 h-1 w-24 bg-gradient-to-r from-indigo-500 to-blue-500 mx-auto rounded-full opacity-50" />}
+            </header>
+            <PendingTicker users={allUsers} payments={payments} />
+          </>
         )}
 
         <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
@@ -824,10 +1468,17 @@ export default function App() {
               activeColor="indigo"
             />
             <SidebarItem 
+              active={activeTab === 'directory'} 
+              onClick={() => setActiveTab('directory')}
+              icon={<BookOpen size={20} />}
+              label="Directory"
+              activeColor="blue"
+            />
+            <SidebarItem 
               active={activeTab === 'users'} 
               onClick={() => setActiveTab('users')}
               icon={<Users size={20} />}
-              label="Residents"
+              label="Owners"
               activeColor="emerald"
             />
             <SidebarItem 
@@ -851,6 +1502,24 @@ export default function App() {
               label="Payment Report"
               activeColor="emerald"
             />
+            {isAdmin && (
+              <SidebarItem 
+                active={activeTab === 'pending'} 
+                onClick={() => setActiveTab('pending')}
+                icon={<AlertCircle size={20} />}
+                label="Pending List"
+                activeColor="rose"
+              />
+            )}
+            {isAdmin && (
+              <SidebarItem 
+                active={activeTab === 'settings'} 
+                onClick={() => setActiveTab('settings')}
+                icon={<Settings size={20} />}
+                label="Settings"
+                activeColor="neutral"
+              />
+            )}
             <SidebarItem 
               active={activeTab === 'legal'} 
               onClick={() => setActiveTab('legal')}
@@ -929,6 +1598,7 @@ export default function App() {
                 <AdminDashboard 
                   stats={{ users: allUsers, payments, announcements, accounts }} 
                   onViewHistory={() => setActiveTab('ledger')}
+                  setActiveTab={setActiveTab}
                 />
               ) : (
                 <OwnerDashboard 
@@ -937,6 +1607,17 @@ export default function App() {
                   onViewHistory={() => setActiveTab('ledger')}
                 />
               )}
+            </motion.div>
+          )}
+
+          {activeTab === 'directory' && (
+            <motion.div 
+              key="directory"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+            >
+              <Directory users={allUsers} />
             </motion.div>
           )}
 
@@ -984,6 +1665,17 @@ export default function App() {
             </motion.div>
           )}
 
+          {activeTab === 'pending' && isAdmin && (
+            <motion.div 
+              key="pending"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+            >
+              <PendingList payments={payments} />
+            </motion.div>
+          )}
+
           {activeTab === 'legal' && (
             <motion.div 
               key="legal"
@@ -992,6 +1684,21 @@ export default function App() {
               exit={{ opacity: 0, y: -10 }}
             >
               <LegalSection />
+            </motion.div>
+          )}
+
+          {activeTab === 'settings' && isAdmin && (
+            <motion.div 
+              key="settings"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+            >
+              <SettingsSection 
+                config={appConfig} 
+                onUpdateConfig={handleUpdateConfig} 
+                accounts={accounts} 
+              />
             </motion.div>
           )}
         </AnimatePresence>
@@ -1055,6 +1762,112 @@ function SidebarItem({ active, onClick, icon, label, activeColor = 'neutral' }: 
 }
 
 function PaymentDetailModal({ payment, onClose }: { payment: PaymentRecord, onClose: () => void }) {
+  const handleDownloadReceipt = () => {
+    const receiptHtml = `
+      <html>
+        <head>
+          <title>Receipt - ${payment.flatNumber} - ${payment.month}</title>
+          <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+            body { font-family: 'Inter', sans-serif; padding: 40px; color: #1a1a1a; line-height: 1.5; }
+            .receipt-container { max-width: 700px; margin: 0 auto; border: 1px solid #e5e7eb; padding: 50px; border-radius: 24px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); }
+            .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #f3f4f6; padding-bottom: 30px; margin-bottom: 40px; }
+            .header-left h1 { margin: 0; font-size: 28px; font-weight: 800; color: #4f46e5; letter-spacing: -0.025em; }
+            .header-left p { margin: 4px 0 0; color: #6b7280; font-size: 14px; font-weight: 500; }
+            .header-right { text-align: right; }
+            .header-right h2 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; color: #9ca3af; }
+            .header-right p { margin: 4px 0 0; font-size: 18px; font-weight: 700; color: #111827; }
+            
+            .details-grid { display: grid; grid-template-cols: 1fr 1fr; gap: 32px; margin-bottom: 40px; }
+            .detail-item { }
+            .label { font-size: 11px; color: #9ca3af; text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em; margin-bottom: 6px; }
+            .value { font-size: 15px; color: #111827; font-weight: 600; }
+            
+            .amount-card { background: #f9fafb; border: 1px solid #f3f4f6; padding: 32px; border-radius: 20px; text-align: center; margin-bottom: 40px; }
+            .amount-label { font-size: 14px; color: #6b7280; font-weight: 500; margin-bottom: 8px; }
+            .amount-value { font-size: 42px; font-weight: 800; color: #10b981; }
+            
+            .status-stamp { display: inline-block; border: 3px solid #10b981; color: #10b981; padding: 8px 24px; border-radius: 12px; font-size: 24px; font-weight: 800; text-transform: uppercase; transform: rotate(-12deg); margin-top: 10px; opacity: 0.8; }
+            
+            .footer { margin-top: 60px; padding-top: 30px; border-top: 1px solid #f3f4f6; text-align: center; }
+            .footer p { margin: 4px 0; font-size: 12px; color: #9ca3af; }
+            .footer .org { font-weight: 700; color: #4b5563; margin-top: 12px; font-size: 13px; }
+            
+            @media print {
+              body { padding: 0; }
+              .receipt-container { border: none; box-shadow: none; padding: 20px; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="receipt-container">
+            <div class="header">
+              <div class="header-left">
+                <h1>Whitepalace Apartment</h1>
+                <p>Official Maintenance Receipt</p>
+              </div>
+              <div class="header-right">
+                <h2>Receipt Number</h2>
+                <p>#${payment.id.slice(-8).toUpperCase()}</p>
+              </div>
+            </div>
+            
+            <div class="details-grid">
+              <div class="detail-item">
+                <div class="label">Owner Name</div>
+                <div class="value">${payment.ownerName}</div>
+              </div>
+              <div class="detail-item">
+                <div class="label">Flat Number</div>
+                <div class="value">${payment.flatNumber}</div>
+              </div>
+              <div class="detail-item">
+                <div class="label">Maintenance Month</div>
+                <div class="value">${format(new Date(payment.month + '-01'), 'MMMM yyyy')}</div>
+              </div>
+              <div class="detail-item">
+                <div class="label">Payment Date</div>
+                <div class="value">${(payment as any).date ? format((payment as any).date, 'PPP p') : (payment.paidAt ? format(payment.paidAt.toDate(), 'PPP p') : 'N/A')}</div>
+              </div>
+              <div class="detail-item">
+                <div class="label">Transaction ID</div>
+                <div class="value">${payment.transactionId || 'N/A'}</div>
+              </div>
+              <div class="detail-item">
+                <div class="label">Payment Method</div>
+                <div class="value">${payment.paymentMethod || 'Online'}</div>
+              </div>
+            </div>
+
+            <div class="amount-card">
+              <div class="amount-label">Total Amount Received</div>
+              <div class="amount-value">₹${payment.amount.toLocaleString()}</div>
+              <div class="status-stamp">PAID</div>
+            </div>
+
+            <div class="footer">
+              <p>This is a computer-generated receipt and does not require a physical signature.</p>
+              <p>Thank you for your timely maintenance payment.</p>
+              <p class="org">Whitepalace Apartment Owners Association</p>
+            </div>
+          </div>
+          <script>
+            window.onload = () => {
+              window.print();
+              setTimeout(() => window.close(), 500);
+            };
+          </script>
+        </body>
+      </html>
+    `;
+
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(receiptHtml);
+      printWindow.document.close();
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
       <motion.div 
@@ -1090,7 +1903,7 @@ function PaymentDetailModal({ payment, onClose }: { payment: PaymentRecord, onCl
 
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-neutral-800/50 p-4 rounded-2xl border border-neutral-800">
-              <p className="text-[10px] text-neutral-500 uppercase font-bold tracking-widest mb-1">Resident</p>
+              <p className="text-[10px] text-neutral-500 uppercase font-bold tracking-widest mb-1">Owner</p>
               <p className="font-bold text-neutral-100 truncate">{payment.ownerName}</p>
             </div>
             <div className="bg-neutral-800/50 p-4 rounded-2xl border border-neutral-800">
@@ -1104,10 +1917,12 @@ function PaymentDetailModal({ payment, onClose }: { payment: PaymentRecord, onCl
             <p className="font-bold text-neutral-100">{format(new Date(payment.month + '-01'), 'MMMM yyyy')}</p>
           </div>
 
-          {payment.paidAt && (
+          {((payment as any).date || payment.paidAt) && (
             <div className="bg-neutral-800/50 p-4 rounded-2xl border border-neutral-800">
               <p className="text-[10px] text-neutral-500 uppercase font-bold tracking-widest mb-1">Payment Date</p>
-              <p className="font-bold text-neutral-100">{format(payment.paidAt.toDate(), 'PPP p')}</p>
+              <p className="font-bold text-neutral-100">
+                {format((payment as any).date || payment.paidAt.toDate(), 'PPP p')}
+              </p>
             </div>
           )}
 
@@ -1119,10 +1934,19 @@ function PaymentDetailModal({ payment, onClose }: { payment: PaymentRecord, onCl
           )}
         </div>
 
-        <div className="p-6 bg-neutral-800/30 border-t border-neutral-800">
+        <div className="p-6 bg-neutral-800/30 border-t border-neutral-800 space-y-3">
+          {payment.status === 'paid' && (
+            <button 
+              onClick={handleDownloadReceipt}
+              className="w-full py-4 bg-indigo-600 text-white font-bold rounded-2xl hover:bg-indigo-500 transition-all shadow-lg flex items-center justify-center gap-2"
+            >
+              <Download size={20} />
+              Download Receipt
+            </button>
+          )}
           <button 
             onClick={onClose}
-            className="w-full py-4 bg-neutral-100 text-neutral-900 font-bold rounded-2xl hover:bg-white transition-all shadow-lg"
+            className="w-full py-4 bg-neutral-800 text-neutral-300 font-bold rounded-2xl hover:bg-neutral-700 transition-all"
           >
             Close Details
           </button>
@@ -1132,8 +1956,66 @@ function PaymentDetailModal({ payment, onClose }: { payment: PaymentRecord, onCl
   );
 }
 
-function AdminDashboard({ stats, onViewHistory }: { stats: { users: UserProfile[], payments: PaymentRecord[], announcements: Announcement[], accounts: AccountEntry[] }, onViewHistory: () => void }) {
+function AdminDashboard({ stats, onViewHistory, setActiveTab }: { stats: { users: UserProfile[], payments: PaymentRecord[], announcements: Announcement[], accounts: AccountEntry[] }, onViewHistory: () => void, setActiveTab: (tab: 'dashboard' | 'users' | 'announcements' | 'legal' | 'accounts' | 'ledger' | 'pending') => void }) {
   const [selectedPayment, setSelectedPayment] = useState<PaymentRecord | null>(null);
+
+  useEffect(() => {
+    const hasSeeded = localStorage.getItem('advance_payments_seeded_v3');
+    if (!hasSeeded && auth.currentUser?.email === 'jkrsanskrit@gmail.com' && stats.users.length > 0) {
+      const seedAdvancePayments = async () => {
+        const advancePayments = [
+          { flat: 'B 1', owner: 'ANILA KURUVILLA', months: ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN'], year: 2026, amount: 1500 },
+          { flat: 'C 1', owner: 'JAYALAKSHMI', months: ['JAN', 'FEB', 'MAR', 'APR', 'MAY'], year: 2026, amount: 1500 },
+          { flat: 'E 3', owner: 'VIDYASEKHAR', months: ['JAN', 'FEB', 'MAR'], year: 2026, amount: 1500 }
+        ];
+
+        try {
+          for (const data of advancePayments) {
+            const flat = normalizeFlat(data.flat);
+            const resident = stats.users.find(u => normalizeFlat(u.flatNumber || '') === flat);
+            
+            if (!resident) continue;
+
+            for (const month of data.months) {
+              const existing = stats.accounts.find(a => 
+                a.flatNumber === flat && 
+                a.forMonth === month && 
+                a.forYear === data.year &&
+                a.isAdvanceAllocation
+              );
+
+              if (existing) continue;
+
+              await addDoc(collection(db, 'accounts'), {
+                particulars: `Advance Maintenance - ${data.owner}`,
+                income: 0,
+                expense: 0,
+                method: 'bank',
+                isWithdrawal: false,
+                isOpeningBalance: false,
+                isAdvanceAllocation: true,
+                displayAmount: data.amount,
+                amount: 0,
+                forMonth: month,
+                forYear: data.year,
+                date: Timestamp.fromDate(new Date(data.year, MONTHS.indexOf(month), 1)),
+                flatNumber: flat,
+                ownerUid: resident.uid,
+                ownerName: resident.displayName,
+                createdAt: serverTimestamp()
+              });
+            }
+          }
+          localStorage.setItem('advance_payments_seeded_v3', 'true');
+          toast.success('Advance payments recorded successfully!');
+        } catch (err) {
+          console.error('Error seeding advance payments:', err);
+        }
+      };
+      seedAdvancePayments();
+    }
+  }, [auth.currentUser, stats.users, stats.accounts]);
+
   const isOverdue = (monthKey: string) => {
     if (!monthKey) return false;
     const [year, month] = monthKey.split('-').map(Number);
@@ -1142,8 +2024,57 @@ function AdminDashboard({ stats, onViewHistory }: { stats: { users: UserProfile[
     return new Date() > dueDate;
   };
 
-  // Calculate Total Income from filtered accounts (Ledger)
-  const totalIncome = stats.accounts.reduce((acc, a) => acc + Number(a.income || 0), 0);
+  // Calculate stats from accounts
+  const { cashInHand, cashInBank, totalIncome, totalExpense } = useMemo(() => {
+    const sorted = [...stats.accounts]
+      .filter(acc => !acc.isAdvanceAllocation && acc.date)
+      .sort((a, b) => {
+        const dateA = a.date instanceof Date ? a.date : a.date.toDate();
+        const dateB = b.date instanceof Date ? b.date : b.date.toDate();
+        return dateA.getTime() - dateB.getTime();
+      });
+
+    let currentCash = 0;
+    let currentBank = 0;
+    let grandIncome = 0;
+    let grandExpense = 0;
+
+    sorted.forEach(acc => {
+      if (acc.isOpeningBalance) {
+        if (acc.method === 'bank') {
+          currentBank += Number(acc.amount || 0);
+        } else {
+          currentCash += Number(acc.amount || 0);
+        }
+        grandIncome += Number(acc.openingIncome || 0);
+        grandExpense += Number(acc.openingExpense || 0);
+      } else if (acc.isWithdrawal) {
+        currentCash += Number(acc.amount || 0);
+        currentBank -= Number(acc.amount || 0);
+      } else {
+        if (acc.method === 'bank') {
+          currentBank += Number(acc.income || 0);
+          currentBank -= Number(acc.expense || 0);
+        } else {
+          currentCash += Number(acc.income || 0);
+          currentCash -= Number(acc.expense || 0);
+        }
+        grandIncome += Number(acc.income || 0);
+        grandExpense += Number(acc.expense || 0);
+      }
+    });
+
+    return {
+      cashInHand: currentCash,
+      cashInBank: currentBank,
+      totalIncome: grandIncome,
+      totalExpense: grandExpense
+    };
+  }, [stats.accounts]);
+  
+  const earliestDate = stats.accounts.length > 0 
+    ? format(stats.accounts[0].date, 'dd/MM/yyyy') 
+    : '01/05/2025';
   
   const pendingAmount = stats.payments
     .filter(p => p.status === 'pending' && isOverdue(p.month))
@@ -1172,83 +2103,151 @@ function AdminDashboard({ stats, onViewHistory }: { stats: { users: UserProfile[
   const totalResidents = stats.users.length;
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-      <StatCard 
-        label="Total Residents" 
-        value={totalResidents.toString()} 
-        icon={<Users size={20} />} 
-        color="blue" 
-      />
-      <StatCard 
-        label="Total Income" 
-        value={`₹${totalIncome.toLocaleString()}`} 
-        icon={<TrendingUp size={20} />} 
-        color="green" 
-      />
-      <StatCard 
-        label="Pending Dues" 
-        value={`₹${pendingAmount.toLocaleString()}`} 
-        icon={<AlertCircle size={20} />} 
-        color="orange" 
-      />
+    <div className="space-y-8">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <StatCard 
+          label="Cash in Hand" 
+          value={`₹${cashInHand.toLocaleString()}`} 
+          color="green" 
+        />
+        <StatCard 
+          label="Cash in Bank" 
+          value={`₹${cashInBank.toLocaleString()}`} 
+          color="blue" 
+        />
+        <StatCard 
+          label="Total Income" 
+          value={`₹${totalIncome.toLocaleString()}`} 
+          color="indigo" 
+          subtitle={`From ${earliestDate}`}
+        />
+        <StatCard 
+          label="Total Expense" 
+          value={`₹${totalExpense.toLocaleString()}`} 
+          color="rose" 
+          subtitle={`From ${earliestDate}`}
+        />
+        <StatCard 
+          label="Pending Dues" 
+          value={`₹${pendingAmount.toLocaleString()}`} 
+          color="orange" 
+          subtitle="Past 10th of month"
+          icon={<AlertCircle size={20} />}
+        />
+      </div>
 
-      <div className="md:col-span-2 bg-neutral-900 p-6 rounded-3xl border border-neutral-800 shadow-sm">
-        <h3 className="text-lg font-bold text-neutral-100 mb-6">Revenue Overview</h3>
-        <div className="h-64 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#262626" />
-              <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#737373' }} />
-              <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#737373' }} />
-              <Tooltip 
-                cursor={{ fill: '#171717' }}
-                contentStyle={{ backgroundColor: '#171717', borderRadius: '12px', border: '1px solid #262626', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.5)' }}
-                itemStyle={{ color: '#f5f5f5' }}
-              />
-              <Bar dataKey="amount" radius={[4, 4, 0, 0]}>
-                {chartData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={index === new Date().getMonth() ? '#4f46e5' : '#404040'} />
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="md:col-span-2 bg-neutral-900 p-6 rounded-3xl border border-neutral-800 shadow-sm">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-lg font-bold text-neutral-100">Revenue Overview</h3>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-indigo-500"></div>
+                <span className="text-xs text-neutral-500 font-medium">Income</span>
+              </div>
+            </div>
+          </div>
+          <div className="h-64 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData} onClick={() => setActiveTab('accounts')} style={{ cursor: 'pointer' }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#262626" />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#737373' }} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#737373' }} />
+                <Tooltip 
+                  cursor={{ fill: '#171717' }}
+                  contentStyle={{ backgroundColor: '#171717', borderRadius: '12px', border: '1px solid #262626', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.5)' }}
+                  itemStyle={{ color: '#f5f5f5' }}
+                />
+                <Bar dataKey="amount" radius={[4, 4, 0, 0]}>
+                  {chartData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={index === new Date().getMonth() ? '#4f46e5' : '#404040'} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="bg-neutral-900 p-6 rounded-3xl border border-neutral-800 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-bold text-neutral-100">Recent Activity</h3>
+            <button 
+              onClick={onViewHistory}
+              className="p-2 text-neutral-500 hover:text-indigo-400 hover:bg-indigo-400/10 rounded-xl transition-all"
+              title="View Full History"
+            >
+              <History size={18} />
+            </button>
+          </div>
+          <div className="space-y-4">
+                {stats.payments.slice(0, 4).map(payment => (
+                  <div key={payment.id} className="flex items-center gap-2">
+                    <button 
+                      onClick={() => setSelectedPayment(payment)}
+                      className="flex-1 flex items-center gap-3 p-3 hover:bg-neutral-800 rounded-2xl transition-all group text-left"
+                    >
+                      <div className={cn(
+                        "w-10 h-10 rounded-xl flex items-center justify-center transition-transform group-hover:scale-110",
+                        payment.status === 'paid' ? "bg-green-900/30 text-green-400" : "bg-orange-900/30 text-orange-400"
+                      )}>
+                        {payment.status === 'paid' ? <CheckCircle2 size={16} /> : <Clock size={16} />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-bold text-neutral-100 truncate">{payment.ownerName}</p>
+                          {payment.particulars?.match(/\((.*?)\)/) && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 uppercase tracking-tight">
+                              {payment.particulars.match(/\((.*?)\)/)?.[1]}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] font-medium text-neutral-500 uppercase tracking-tight">Flat {payment.flatNumber} • ₹{payment.amount}</p>
+                      </div>
+                      <span className="text-[10px] font-black text-neutral-600 uppercase">{format(payment.createdAt?.toDate() || new Date(), 'MMM d')}</span>
+                    </button>
+                  </div>
                 ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+            {stats.payments.length === 0 && (
+              <p className="text-center py-8 text-neutral-600 font-medium italic">No recent activity.</p>
+            )}
+          </div>
         </div>
       </div>
 
-      <div className="bg-neutral-900 p-6 rounded-3xl border border-neutral-800 shadow-sm">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-bold text-neutral-100">Recent Activity</h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="bg-neutral-900 p-6 rounded-3xl border border-neutral-800 shadow-sm flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-blue-500/10 text-blue-400 flex items-center justify-center">
+              <Users size={24} />
+            </div>
+            <div>
+              <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider">Total Owners</p>
+              <p className="text-2xl font-black text-neutral-100">{totalResidents}</p>
+            </div>
+          </div>
           <button 
-            onClick={onViewHistory}
-            className="p-2 text-neutral-500 hover:text-indigo-400 hover:bg-indigo-400/10 rounded-xl transition-all"
-            title="View Full History"
+            onClick={() => setActiveTab('users')}
+            className="text-xs font-bold text-indigo-400 hover:text-indigo-300 transition-colors uppercase tracking-widest"
           >
-            <History size={18} />
+            Manage
           </button>
         </div>
-        <div className="space-y-4">
-          {stats.payments.slice(0, 4).map(payment => (
-            <button 
-              key={payment.id} 
-              onClick={() => setSelectedPayment(payment)}
-              className="w-full flex items-center gap-3 p-3 hover:bg-neutral-800 rounded-2xl transition-all group text-left"
-            >
-              <div className={cn(
-                "w-10 h-10 rounded-xl flex items-center justify-center transition-transform group-hover:scale-110",
-                payment.status === 'paid' ? "bg-green-900/30 text-green-400" : "bg-orange-900/30 text-orange-400"
-              )}>
-                {payment.status === 'paid' ? <CheckCircle2 size={16} /> : <Clock size={16} />}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-bold text-neutral-100 truncate">{payment.ownerName}</p>
-                <p className="text-[11px] font-medium text-neutral-500 uppercase tracking-tight">Flat {payment.flatNumber} • ₹{payment.amount}</p>
-              </div>
-              <span className="text-[10px] font-black text-neutral-600 uppercase">{format(payment.createdAt?.toDate() || new Date(), 'MMM d')}</span>
-            </button>
-          ))}
-          {stats.payments.length === 0 && (
-            <p className="text-center py-8 text-neutral-600 font-medium italic">No recent activity.</p>
-          )}
+        <div className="bg-neutral-900 p-6 rounded-3xl border border-neutral-800 shadow-sm flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-orange-500/10 text-orange-400 flex items-center justify-center">
+              <AlertCircle size={24} />
+            </div>
+            <div>
+              <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider">Pending Dues</p>
+              <p className="text-2xl font-black text-neutral-100">₹{pendingAmount.toLocaleString()}</p>
+            </div>
+          </div>
+          <button 
+            onClick={() => setActiveTab('ledger')}
+            className="text-xs font-bold text-indigo-400 hover:text-indigo-300 transition-colors uppercase tracking-widest"
+          >
+            View
+          </button>
         </div>
       </div>
 
@@ -1267,9 +2266,65 @@ function OwnerDashboard({ stats, profile, onViewHistory }: { stats: { payments: 
   const pendingPayments = stats.payments.filter(p => p.status === 'pending' || p.status === 'verifying');
   const totalPaid = stats.payments.filter(p => p.status === 'paid').reduce((acc, p) => acc + p.amount, 0);
 
+  const pendingDues = useMemo(() => {
+    const currentMonth = new Date().getMonth();
+    const currentYear = new Date().getFullYear();
+    const today = new Date().getDate();
+    const pending: { month: string, year: number, amount: number }[] = [];
+
+    if (today > 10 && profile.flatNumber) {
+      const SYSTEM_START_MONTH = 4;
+      const SYSTEM_START_YEAR = 2025;
+      const checkUntil = new Date(currentYear, currentMonth - 1, 1);
+      const flat = normalizeFlat(profile.flatNumber);
+      const flatPayments = stats.payments.filter(p => normalizeFlat(p.flatNumber) === flat && p.status === 'paid');
+
+      let iterDate = new Date(SYSTEM_START_YEAR, SYSTEM_START_MONTH, 1);
+      while (iterDate <= checkUntil) {
+        const monthKey = `${iterDate.getFullYear()}-${String(iterDate.getMonth() + 1).padStart(2, '0')}`;
+        if (!flatPayments.some(p => p.month === monthKey)) {
+          pending.push({
+            month: MONTHS[iterDate.getMonth()],
+            year: iterDate.getFullYear(),
+            amount: 1200
+          });
+        }
+        iterDate.setMonth(iterDate.getMonth() + 1);
+      }
+    }
+    return pending;
+  }, [stats.payments, profile.flatNumber]);
+
+  const totalPendingAmount = pendingDues.reduce((acc, p) => acc + p.amount, 0);
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
       <div className="md:col-span-2 space-y-6">
+        {totalPendingAmount > 0 && (
+          <motion.div 
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-rose-950/40 border-2 border-rose-500 p-6 rounded-3xl flex items-center justify-between gap-4 shadow-[0_0_20px_rgba(244,63,94,0.2)]"
+          >
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-rose-900/30 text-rose-400 rounded-2xl flex items-center justify-center animate-pulse">
+                <AlertCircle size={24} />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-rose-100">Action Required: Pending Dues</h3>
+                <p className="text-rose-400/80 font-medium">You have ₹{totalPendingAmount.toLocaleString()} outstanding for {pendingDues.length} month(s).</p>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {pendingDues.map((p, i) => (
+                    <span key={i} className="text-[10px] bg-rose-900/40 text-rose-300 px-2 py-0.5 rounded-full font-bold border border-rose-800/50">
+                      {p.month} {p.year}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
         {pendingPayments.length > 0 ? (
           <div className="bg-orange-950/20 border border-orange-900/30 p-6 rounded-3xl flex items-center justify-between gap-4">
             <div className="flex items-center gap-4">
@@ -1308,41 +2363,49 @@ function OwnerDashboard({ stats, profile, onViewHistory }: { stats: { payments: 
           </div>
           <div className="space-y-4">
             {stats.payments.slice(0, 4).map(payment => (
-              <button 
-                key={payment.id} 
-                onClick={() => setSelectedPayment(payment)}
-                className="w-full flex items-center justify-between p-4 bg-neutral-800/50 rounded-2xl border border-neutral-800/50 hover:bg-neutral-800 transition-all text-left"
-              >
-                <div className="flex items-center gap-4">
-                  <div className={cn(
-                    "w-10 h-10 rounded-xl flex items-center justify-center",
-                    payment.status === 'paid' ? "bg-green-900/30 text-green-400" : 
-                    payment.status === 'verifying' ? "bg-blue-900/30 text-blue-400" :
-                    "bg-orange-900/30 text-orange-400"
-                  )}>
-                    <CreditCard size={20} />
+              <div key={payment.id} className="flex items-center gap-2">
+                <button 
+                  onClick={() => setSelectedPayment(payment)}
+                  className="flex-1 flex items-center justify-between p-4 bg-neutral-800/50 rounded-2xl border border-neutral-800/50 hover:bg-neutral-800 transition-all text-left"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className={cn(
+                      "w-10 h-10 rounded-xl flex items-center justify-center",
+                      payment.status === 'paid' ? "bg-green-900/30 text-green-400" : 
+                      payment.status === 'verifying' ? "bg-blue-900/30 text-blue-400" :
+                      "bg-orange-900/30 text-orange-400"
+                    )}>
+                      <CreditCard size={20} />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="font-bold text-neutral-100">{format(new Date(payment.month + '-01'), 'MMMM yyyy')}</p>
+                        {payment.particulars?.match(/\((.*?)\)/) && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 uppercase tracking-tight">
+                            {payment.particulars.match(/\((.*?)\)/)?.[1]}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-neutral-500">
+                        {payment.status === 'paid' ? `Paid on ${format(payment.paidAt?.toDate() || new Date(), 'MMM d, yyyy')}` : 
+                         payment.status === 'verifying' ? 'Verification Pending' :
+                         'Awaiting payment'}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="font-bold text-neutral-100">{format(new Date(payment.month + '-01'), 'MMMM yyyy')}</p>
-                    <p className="text-xs text-neutral-500">
-                      {payment.status === 'paid' ? `Paid on ${format(payment.paidAt?.toDate() || new Date(), 'MMM d, yyyy')}` : 
-                       payment.status === 'verifying' ? 'Verification Pending' :
-                       'Awaiting payment'}
-                    </p>
+                  <div className="text-right">
+                    <p className="font-bold text-neutral-100">₹{payment.amount}</p>
+                    <span className={cn(
+                      "text-[10px] font-bold uppercase px-2 py-1 rounded-md",
+                      payment.status === 'paid' ? "bg-green-900/30 text-green-400" : 
+                      payment.status === 'verifying' ? "bg-blue-900/30 text-blue-400" :
+                      "bg-orange-900/30 text-orange-400"
+                    )}>
+                      {payment.status === 'verifying' ? 'Verifying' : payment.status}
+                    </span>
                   </div>
-                </div>
-                <div className="text-right">
-                  <p className="font-bold text-neutral-100">₹{payment.amount}</p>
-                  <span className={cn(
-                    "text-[10px] font-bold uppercase px-2 py-1 rounded-md",
-                    payment.status === 'paid' ? "bg-green-900/30 text-green-400" : 
-                    payment.status === 'verifying' ? "bg-blue-900/30 text-blue-400" :
-                    "bg-orange-900/30 text-orange-400"
-                  )}>
-                    {payment.status === 'verifying' ? 'Verifying' : payment.status}
-                  </span>
-                </div>
-              </button>
+                </button>
+              </div>
             ))}
             {stats.payments.length === 0 && (
               <p className="text-center py-8 text-neutral-600 font-medium">No payment records found.</p>
@@ -1389,6 +2452,7 @@ function QuickMaintenanceForm({ onClose, onSuccess, residents, payments }: { onC
   const [error, setError] = useState<string | null>(null);
   const [owners, setOwners] = useState<any[]>([]);
   const [loadingResidents, setLoadingResidents] = useState(true);
+  const [isHistorical, setIsHistorical] = useState(false);
 
   const getCurrentMonth = (d: Date) => {
     const prevDate = new Date(d.getFullYear(), d.getMonth() - 1, 1);
@@ -1400,13 +2464,26 @@ function QuickMaintenanceForm({ onClose, onSuccess, residents, payments }: { onC
 
   useEffect(() => {
     const current = getCurrentMonth(date);
-    // Use provided residents if available, otherwise use fallback
+        // Use provided residents if available, otherwise use fallback
     const dbResidents = residents
       .filter(r => r.flatNumber) // Only include those with a flat number
       .map(r => {
         const monthKey = `${current.year}-${String(MONTHS.indexOf(current.month) + 1).padStart(2, '0')}`;
-        const alreadyPaid = payments.some(p => p.ownerUid === r.uid && p.month === monthKey && p.status === 'paid');
+        const alreadyPaid = payments.some(p => p.ownerUid === r.uid && p.month === monthKey && (p.status === 'paid' || p.status === 'PAID'));
         
+        // Find next expected month
+        const ownerPayments = payments
+          .filter(p => p.ownerUid === r.uid && (p.status === 'paid' || p.status === 'PAID'))
+          .sort((a, b) => b.month.localeCompare(a.month));
+        
+        let nextExpectedMonth = "";
+        if (ownerPayments.length > 0) {
+          const lastPaid = ownerPayments[0].month; // YYYY-MM
+          const [year, month] = lastPaid.split('-').map(Number);
+          const nextDate = new Date(year, month, 1); // month is 0-indexed in Date, but here it's 1-indexed month from string, so Date(year, month, 1) gives next month
+          nextExpectedMonth = `${MONTHS[nextDate.getMonth()]} ${nextDate.getFullYear()}`;
+        }
+
         return {
           uid: r.uid,
           flatNumber: r.flatNumber || '?',
@@ -1418,7 +2495,9 @@ function QuickMaintenanceForm({ onClose, onSuccess, residents, payments }: { onC
           forMonth: current.month,
           forYear: current.year,
           alreadyPaid,
-          allowMultiple: false
+          nextExpectedMonth,
+          allowMultiple: false,
+          isBulk: false
         };
       });
 
@@ -1426,32 +2505,19 @@ function QuickMaintenanceForm({ onClose, onSuccess, residents, payments }: { onC
       setOwners(dbResidents.sort((a, b) => a.flatNumber.localeCompare(b.flatNumber, undefined, { numeric: true, sensitivity: 'base' })));
     } else {
       // Fallback if no residents found in system yet
-      const fallback = [
-        { flatNumber: 'A1', displayName: 'Renjini' },
-        { flatNumber: 'A2', displayName: 'Deepu' },
-        { flatNumber: 'A3', displayName: 'Sudha Subramaniyan' },
-        { flatNumber: 'B1', displayName: 'Anila Kuruvilla' },
-        { flatNumber: 'B2', displayName: 'Suresh' },
-        { flatNumber: 'B3', displayName: 'Prathap PV' },
-        { flatNumber: 'C1', displayName: 'Jayalakshmi' },
-        { flatNumber: 'C2', displayName: 'Sindhu' },
-        { flatNumber: 'C3', displayName: 'Jayan KR' },
-        { flatNumber: 'D2', displayName: 'Usha G Menon' },
-        { flatNumber: 'D3', displayName: 'Prem Narayanan' },
-        { flatNumber: 'E2', displayName: 'Balachandran' },
-        { flatNumber: 'E3', displayName: 'Vidyashekhar' },
-        { flatNumber: 'F1', displayName: 'MohanaKrishnan' },
-        { flatNumber: 'F2', displayName: 'Sudha Dinaker' },
-        { flatNumber: 'F3', displayName: 'Seema Sreekumar' }
-      ].map(o => ({
-        ...o,
+      const fallback = ALL_FLATS.map(f => ({
+        flatNumber: f.flat,
+        displayName: f.name,
         uid: '',
         selected: false,
         customAmount: 1200,
         date: new Date(),
         months: 1,
         forMonth: current.month,
-        forYear: current.year
+        forYear: current.year,
+        alreadyPaid: false,
+        allowMultiple: false,
+        isBulk: false
       }));
       setOwners(fallback);
     }
@@ -1461,7 +2527,7 @@ function QuickMaintenanceForm({ onClose, onSuccess, residents, payments }: { onC
   const handleSyncFromResidents = async () => {
     // This is now handled by the prop, but we can keep it for manual refresh if needed
     // or just show a toast that it's synced
-    toast.success("Resident list is synced with the main list.");
+    toast.success("Owner list is synced with the main list.");
   };
 
   const handlePost = async () => {
@@ -1475,6 +2541,13 @@ function QuickMaintenanceForm({ onClose, onSuccess, residents, payments }: { onC
     setError(null);
 
     try {
+      const alreadyPaidOwners = selectedOwners.filter(o => o.alreadyPaid && !o.allowMultiple);
+      if (alreadyPaidOwners.length > 0) {
+        setError(`Submission blocked: ${alreadyPaidOwners.map(o => `${o.flatNumber} (${o.forMonth})`).join(', ')} already have payments recorded for the selected month. Use 'MP' button if you explicitly want to allow multiple payments.`);
+        setSaving(false);
+        return;
+      }
+
       for (const owner of selectedOwners) {
         const startMonthIdx = MONTHS.indexOf(owner.forMonth);
         const startForDate = new Date(owner.forYear, startMonthIdx, 1);
@@ -1498,18 +2571,24 @@ function QuickMaintenanceForm({ onClose, onSuccess, residents, payments }: { onC
           description = `${endForMonth} ${endForYear}`;
         }
 
-        const particulars = `${owner.flatNumber} ${owner.displayName} (${description})`;
+        const tenantName = getTenantName(owner.flatNumber);
+        const particulars = `${owner.flatNumber} ${owner.displayName}${tenantName ? ` (Tenant: ${tenantName})` : ''} (${description})`;
 
         const mainDocRef = await addDoc(collection(db, 'accounts'), {
           date: Timestamp.fromDate(paymentDate),
           particulars: particulars,
-          income: owner.customAmount,
+          income: isHistorical ? 0 : owner.customAmount,
           expense: 0,
           method: 'bank',
           isWithdrawal: false,
           isOpeningBalance: false,
-          forMonth: endForMonth,
-          forYear: endForYear,
+          isAdvanceAllocation: isHistorical,
+          displayAmount: 0, // Use shadow entries for monthly maintenance display
+          forMonth: isHistorical ? null : owner.forMonth,
+          forYear: isHistorical ? null : owner.forYear,
+          flatNumber: owner.flatNumber,
+          ownerUid: owner.uid,
+          ownerName: owner.displayName,
           createdAt: serverTimestamp()
         });
         const mainId = mainDocRef.id;
@@ -1524,13 +2603,13 @@ function QuickMaintenanceForm({ onClose, onSuccess, residents, payments }: { onC
           // Check if a payment record already exists for this month/flat
           const q = query(
             collection(db, 'payments'), 
-            where('ownerUid', '==', owner.uid),
+            where('flatNumber', '==', owner.flatNumber),
             where('month', '==', monthKey)
           );
           
-          // We can't use getDocs easily here without await, so we'll just add a new one or use a specific ID
-          // To avoid duplicates, let's use a deterministic ID: ownerUid_monthKey
-          const paymentId = `${owner.uid}_${monthKey}`;
+          // To avoid duplicates, use a deterministic ID: (uid or flat)_monthKey
+          const identifier = owner.uid || normalizeFlat(owner.flatNumber);
+          const paymentId = `${identifier}_${monthKey}`;
           await setDoc(doc(db, 'payments', paymentId), {
             ownerUid: owner.uid,
             ownerName: owner.displayName,
@@ -1542,15 +2621,25 @@ function QuickMaintenanceForm({ onClose, onSuccess, residents, payments }: { onC
             createdAt: serverTimestamp(),
             transactionId: `MANUAL_${Date.now()}`,
             particulars: `Manual Entry: ${particulars}`,
-            parentAccountId: mainId
+            parentAccountId: mainId,
+            installmentIndex: i + 1,
+            totalInstallments: owner.months
           }, { merge: true });
 
           // 3. Create shadow entries for future months (Advance Allocation) in 'accounts'
-          // Only create shadow entries for months AFTER the payment month
-          if (currentForDate > paymentMonthYear) {
+          // For historical payments, create shadow entries for ALL months to ensure they show in ledger without income impact
+          if (isHistorical || currentForDate > paymentMonthYear) {
+            const tenantName = getTenantName(owner.flatNumber);
+            // Shift ledger month to the next month (e.g., March maintenance shows in April ledger)
+            const ledgerDate = isHistorical 
+              ? new Date(currentForDate.getFullYear(), currentForDate.getMonth() + 1, 1)
+              : currentForDate;
+            const ledgerMonth = MONTHS[ledgerDate.getMonth()];
+            const ledgerYear = ledgerDate.getFullYear();
+
             await addDoc(collection(db, 'accounts'), {
               date: null, // No date for shadow entries
-              particulars: `${owner.flatNumber} ${owner.displayName} (From advance payment of ${MONTHS[paymentDate.getMonth()]})`,
+              particulars: `${owner.flatNumber} ${owner.displayName}${tenantName ? ` (Tenant: ${tenantName})` : ''} (${isHistorical ? 'Past Advance Adjustment' : `From advance payment of ${MONTHS[paymentDate.getMonth()]}`})`,
               income: 0, // Doesn't affect balance
               displayAmount: monthlyAmount, // For UI display
               expense: 0,
@@ -1558,12 +2647,15 @@ function QuickMaintenanceForm({ onClose, onSuccess, residents, payments }: { onC
               isWithdrawal: false,
               isOpeningBalance: false,
               isAdvanceAllocation: true,
+              installmentIndex: i + 1,
+              totalInstallments: owner.months,
               originalPaymentDate: Timestamp.fromDate(paymentDate),
-              forMonth: currentForMonth,
-              forYear: currentForYear,
+              forMonth: ledgerMonth,
+              forYear: ledgerYear,
               createdAt: serverTimestamp(),
               parentAccountId: mainId,
               ownerUid: owner.uid,
+              ownerName: owner.displayName,
               flatNumber: owner.flatNumber
             });
           }
@@ -1580,21 +2672,84 @@ function QuickMaintenanceForm({ onClose, onSuccess, residents, payments }: { onC
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h4 className="text-sm font-bold text-neutral-400 uppercase tracking-widest">Resident List</h4>
+        <h4 className="text-sm font-bold text-neutral-400 uppercase tracking-widest">Owner List</h4>
         <button 
           onClick={handleSyncFromResidents}
           className="flex items-center gap-2 text-xs font-bold text-indigo-400 hover:text-indigo-300 transition-colors"
         >
           <RefreshCw size={14} />
-          Sync from Residents
+          Sync from Owners
         </button>
       </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-neutral-800/30 p-4 rounded-2xl border border-neutral-700">
+        <div className="relative">
+          <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-2">Bulk Payment Date</label>
+          <div className="relative">
+            <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" size={14} />
+            <input 
+              type="date" 
+              value={format(date, 'yyyy-MM-dd')}
+              onClick={(e) => (e.currentTarget as any).showPicker?.()}
+              onFocus={(e) => (e.currentTarget as any).showPicker?.()}
+              onChange={(e) => {
+                const newDate = new Date(e.target.value);
+                setDate(newDate);
+                const current = getCurrentMonth(newDate);
+                // Update all owners' dates AND their default forMonth/forYear
+                setOwners(owners.map(o => {
+                  const monthKey = `${current.year}-${String(MONTHS.indexOf(current.month) + 1).padStart(2, '0')}`;
+                  const alreadyPaid = payments.some(p => p.ownerUid === o.uid && p.month === monthKey && (p.status === 'paid' || p.status === 'PAID'));
+                  return { 
+                    ...o, 
+                    date: newDate,
+                    forMonth: current.month,
+                    forYear: current.year,
+                    alreadyPaid
+                  };
+                }));
+              }}
+              className="w-full pl-9 pr-4 py-2 bg-neutral-800 border border-neutral-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100 text-sm cursor-pointer relative"
+            />
+          </div>
+        </div>
+        <div className="flex items-center gap-2 p-3 bg-amber-900/10 border border-amber-900/20 rounded-xl self-end">
+          <input 
+            type="checkbox"
+            id="isHistoricalBulk"
+            checked={isHistorical}
+            onChange={(e) => setIsHistorical(e.target.checked)}
+            className="w-4 h-4 rounded border-neutral-700 bg-neutral-800 text-amber-600 focus:ring-amber-500"
+          />
+          <label htmlFor="isHistoricalBulk" className="text-[10px] font-bold text-amber-500 uppercase cursor-pointer flex flex-col">
+            <span>Past Advance / Historical Entry</span>
+            <span className="text-[8px] opacity-60 normal-case">No income impact now. Use for Jan-June cleanup.</span>
+          </label>
+        </div>
+      </div>
+
+      {/* Header Row for alignment */}
+      {!loadingResidents && owners.length > 0 && (
+        <div className="px-3 pb-2 flex flex-col md:flex-row md:items-center gap-4 border-b border-neutral-800">
+          <div className="min-w-[180px] pl-8">
+            <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider">Owner Name</span>
+          </div>
+          <div className="flex-1 grid grid-cols-[0.5fr_1fr_1.2fr_1fr_0.8fr_0.5fr] gap-2">
+            <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider text-center">BK</span>
+            <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider text-center">Date</span>
+            <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider text-center">For Month</span>
+            <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider text-center">Amount</span>
+            <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider text-center">Duration</span>
+            <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider text-center">MP</span>
+          </div>
+        </div>
+      )}
 
       <div className="space-y-2 max-h-80 overflow-y-auto pr-2 no-scrollbar">
         {loadingResidents ? (
           <div className="flex flex-col items-center justify-center py-12 gap-3">
             <RefreshCw className="text-indigo-500 animate-spin" size={24} />
-            <p className="text-sm text-neutral-500 font-medium">Loading residents...</p>
+            <p className="text-sm text-neutral-500 font-medium">Loading owners...</p>
           </div>
         ) : owners.map((owner, idx) => (
           <div key={idx} className={cn(
@@ -1620,27 +2775,76 @@ function QuickMaintenanceForm({ onClose, onSuccess, residents, payments }: { onC
               <div className="flex flex-col">
                 <p className="text-sm font-bold text-neutral-100 truncate">{owner.flatNumber} {owner.displayName}</p>
                 {owner.alreadyPaid && (
-                  <span className="text-[10px] font-bold text-emerald-400">Already Paid</span>
+                  <span className="text-[10px] font-bold text-rose-400 flex items-center gap-1">
+                    <AlertCircle size={10} />
+                    Already Paid
+                  </span>
                 )}
+                {(() => {
+                  const currentMonthKey = `${owner.forYear}-${String(MONTHS.indexOf(owner.forMonth) + 1).padStart(2, '0')}`;
+                  const lastPaid = payments
+                    .filter(p => p.ownerUid === owner.uid && (p.status === 'paid' || p.status === 'PAID'))
+                    .sort((a, b) => b.month.localeCompare(a.month))[0]?.month;
+                  
+                  if (lastPaid && currentMonthKey > lastPaid) {
+                    const [ly, lm] = lastPaid.split('-').map(Number);
+                    const nextDate = new Date(ly, lm, 1);
+                    const nextMonthKey = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`;
+                    
+                    if (currentMonthKey > nextMonthKey) {
+                      return (
+                        <span className="text-[10px] font-bold text-amber-500 flex items-center gap-1">
+                          <AlertTriangle size={10} />
+                          Out of Order (Expected: {MONTHS[nextDate.getMonth()]} {nextDate.getFullYear()})
+                        </span>
+                      );
+                    }
+                  }
+                  return null;
+                })()}
               </div>
             </div>
             
-            <div className="flex-1 grid grid-cols-5 gap-2">
+            <div className="flex-1 grid grid-cols-[0.5fr_1fr_1.2fr_1fr_0.8fr_0.5fr] gap-2 items-center">
+              <div className="flex justify-center">
+                <button
+                  onClick={() => {
+                    const newOwners = [...owners];
+                    newOwners[idx].isBulk = !newOwners[idx].isBulk;
+                    if (!newOwners[idx].isBulk) {
+                      newOwners[idx].customAmount = 1200;
+                      newOwners[idx].months = 1;
+                    }
+                    setOwners(newOwners);
+                  }}
+                  className={cn(
+                    "w-8 h-8 rounded-lg text-[10px] font-black transition-all border",
+                    owner.isBulk 
+                      ? "bg-amber-600 text-white border-amber-400 shadow-lg shadow-amber-900/20" 
+                      : "bg-neutral-800 text-neutral-500 border-neutral-700 hover:border-neutral-600"
+                  )}
+                  title="Bulk Payment Mode"
+                >
+                  BK
+                </button>
+              </div>
+
               <div className={cn("relative", (owner.alreadyPaid && !owner.allowMultiple) && "pointer-events-none")}>
-                <label className="text-[8px] text-neutral-500 uppercase absolute -top-4 left-0">Date</label>
+                <Calendar className="absolute left-2 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none" size={10} />
                 <input 
                   type="date" 
                   value={format(owner.date, 'yyyy-MM-dd')}
+                  onClick={(e) => (e.currentTarget as any).showPicker?.()}
+                  onFocus={(e) => (e.currentTarget as any).showPicker?.()}
                   onChange={(e) => {
                     const newOwners = [...owners];
                     newOwners[idx].date = new Date(e.target.value);
                     setOwners(newOwners);
                   }}
-                  className="w-full px-2 py-2 bg-neutral-800/50 border border-neutral-700 rounded-lg text-[10px] text-neutral-300 focus:ring-1 focus:ring-indigo-500 outline-none"
+                  className="w-full pl-6 pr-2 py-2 bg-neutral-800/50 border border-neutral-700 rounded-lg text-[10px] text-neutral-300 focus:ring-1 focus:ring-indigo-500 outline-none cursor-pointer relative"
                 />
               </div>
               <div className={cn("relative flex gap-1 items-center", (owner.alreadyPaid && !owner.allowMultiple) && "pointer-events-none")}>
-                <label className="text-[8px] text-neutral-500 uppercase absolute -top-4 left-0">For Month</label>
                 <select
                   value={owner.forMonth}
                   onChange={(e) => {
@@ -1650,7 +2854,7 @@ function QuickMaintenanceForm({ onClose, onSuccess, residents, payments }: { onC
                     
                     // Re-check paid status
                     const monthKey = `${newOwners[idx].forYear}-${String(MONTHS.indexOf(newMonth) + 1).padStart(2, '0')}`;
-                    newOwners[idx].alreadyPaid = payments.some(p => p.ownerUid === owner.uid && p.month === monthKey && p.status === 'paid');
+                    newOwners[idx].alreadyPaid = payments.some(p => p.ownerUid === owner.uid && p.month === monthKey && (p.status === 'paid' || p.status === 'PAID'));
                     
                     setOwners(newOwners);
                   }}
@@ -1668,7 +2872,7 @@ function QuickMaintenanceForm({ onClose, onSuccess, residents, payments }: { onC
 
                     // Re-check paid status
                     const monthKey = `${newYear}-${String(MONTHS.indexOf(newOwners[idx].forMonth) + 1).padStart(2, '0')}`;
-                    newOwners[idx].alreadyPaid = payments.some(p => p.ownerUid === owner.uid && p.month === monthKey && p.status === 'paid');
+                    newOwners[idx].alreadyPaid = payments.some(p => p.ownerUid === owner.uid && p.month === monthKey && (p.status === 'paid' || p.status === 'PAID'));
 
                     setOwners(newOwners);
                   }}
@@ -1676,42 +2880,64 @@ function QuickMaintenanceForm({ onClose, onSuccess, residents, payments }: { onC
                 />
               </div>
               <div className={cn("relative", (owner.alreadyPaid && !owner.allowMultiple) && "pointer-events-none")}>
-                <label className="text-[8px] text-neutral-500 uppercase absolute -top-4 left-0">Duration</label>
-                <select
-                  value={owner.months}
-                  onChange={(e) => {
-                    const val = Number(e.target.value);
-                    const newOwners = [...owners];
-                    newOwners[idx].months = val;
-                    // Auto-calculate amount based on months
-                    newOwners[idx].customAmount = val * amount;
-                    setOwners(newOwners);
-                  }}
-                  className="w-full px-2 py-2 bg-neutral-800/50 border border-neutral-700 rounded-lg text-[10px] text-neutral-300 focus:ring-1 focus:ring-indigo-500 outline-none"
-                >
-                  <option value={1}>1 Month</option>
-                  <option value={2}>2 Months</option>
-                  <option value={3}>3 Months</option>
-                  <option value={6}>6 Months</option>
-                  <option value={12}>1 Year</option>
-                </select>
-              </div>
-              <div className={cn("relative", (owner.alreadyPaid && !owner.allowMultiple) && "pointer-events-none")}>
-                <label className="text-[8px] text-neutral-500 uppercase absolute -top-4 left-0">Amount</label>
                 <span className="absolute left-2 top-1/2 -translate-y-1/2 text-neutral-600 text-[10px]">₹</span>
                 <input 
                   type="number"
                   value={owner.customAmount}
+                  disabled={!owner.isBulk}
                   onChange={(e) => {
                     const newOwners = [...owners];
-                    newOwners[idx].customAmount = Number(e.target.value);
+                    const val = Number(e.target.value);
+                    newOwners[idx].customAmount = val;
+                    // Auto-calculate months based on amount (1200 per month)
+                    newOwners[idx].months = Math.max(1, Math.floor(val / 1200));
                     setOwners(newOwners);
                   }}
-                  className="w-full pl-5 pr-2 py-2 bg-neutral-800/50 border border-neutral-700 rounded-lg text-[10px] font-bold text-emerald-400 focus:ring-1 focus:ring-indigo-500 outline-none"
+                  className={cn(
+                    "w-full pl-5 pr-2 py-2 bg-neutral-800/50 border border-neutral-700 rounded-lg text-[10px] font-bold focus:ring-1 focus:ring-indigo-500 outline-none",
+                    owner.isBulk ? "text-emerald-400" : "text-neutral-500"
+                  )}
                 />
+                {owner.isBulk && owner.customAmount !== owner.months * 1200 && (
+                  <span className="absolute -top-4 left-0 text-[7px] text-amber-500 font-black whitespace-nowrap uppercase">
+                    Mismatch (Exp: ₹{owner.months * 1200})
+                  </span>
+                )}
               </div>
-              <div className="relative flex flex-col items-center justify-center gap-1">
-                <label className="text-[8px] text-neutral-500 uppercase">MP</label>
+              <div className="text-center">
+                {owner.isBulk ? (
+                  <div className="flex flex-col items-center gap-0.5">
+                    <div className="flex items-center justify-center gap-1">
+                      <input 
+                        type="number"
+                        min="1"
+                        max="60"
+                        value={owner.months}
+                        onChange={(e) => {
+                          const newOwners = [...owners];
+                          const val = Math.max(1, Number(e.target.value));
+                          newOwners[idx].months = val;
+                          // Auto-update amount based on months (1200 per month)
+                          newOwners[idx].customAmount = val * 1200;
+                          setOwners(newOwners);
+                        }}
+                        className="w-10 px-1 py-1 bg-neutral-800/50 border border-neutral-700 rounded text-[10px] text-center font-bold text-indigo-400 focus:ring-1 focus:ring-indigo-500 outline-none"
+                      />
+                      <span className="text-[8px] font-bold text-neutral-500 uppercase">Mos</span>
+                    </div>
+                    {owner.months > 1 && (
+                      <span className="text-[7px] text-neutral-500 font-bold uppercase whitespace-nowrap">
+                        Until {MONTHS[(MONTHS.indexOf(owner.forMonth) + owner.months - 1) % 12]} {owner.forYear + Math.floor((MONTHS.indexOf(owner.forMonth) + owner.months - 1) / 12)}
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <span className="text-[10px] font-bold text-neutral-500 uppercase">
+                    {owner.months} {owner.months === 1 ? 'Mo' : 'Mos'}
+                  </span>
+                )}
+              </div>
+              <div className="flex justify-center">
                 <input 
                   type="checkbox"
                   checked={owner.allowMultiple}
@@ -1720,7 +2946,8 @@ function QuickMaintenanceForm({ onClose, onSuccess, residents, payments }: { onC
                     newOwners[idx].allowMultiple = !newOwners[idx].allowMultiple;
                     setOwners(newOwners);
                   }}
-                  className="w-4 h-4 rounded bg-neutral-700 border-neutral-600 text-amber-500 focus:ring-amber-500"
+                  className="w-4 h-4 rounded bg-neutral-800 border-neutral-700 text-indigo-600 focus:ring-indigo-500"
+                  title="Allow Multiple Payment (MP)"
                 />
               </div>
             </div>
@@ -1760,30 +2987,265 @@ function QuickMaintenanceForm({ onClose, onSuccess, residents, payments }: { onC
   );
 }
 
-function StatCard({ label, value, icon, color }: { label: string, value: string, icon: React.ReactNode, color: string }) {
+function PendingTicker({ users, payments }: { users: UserProfile[], payments: PaymentRecord[] }) {
+  const currentMonth = new Date().getMonth();
+  const currentYear = new Date().getFullYear();
+  const today = new Date().getDate();
+  
+  const pendingFlats = useMemo(() => {
+    const pending: { flat: string, month: string, year: number }[] = [];
+    
+    // Check if we are past the 10th of the current month
+    // If yes, we check for unpaid dues up to the PREVIOUS month
+    if (today > 10) {
+      const SYSTEM_START_MONTH = 4; // May (0-indexed)
+      const SYSTEM_START_YEAR = 2025;
+      
+      // We check from system start up to the previous month
+      const checkUntil = new Date(currentYear, currentMonth - 1, 1);
+      
+      ALL_FLATS.forEach(f => {
+        const flat = normalizeFlat(f.flat);
+        const flatPayments = payments.filter(p => normalizeFlat(p.flatNumber) === flat && p.status === 'paid');
+        
+        // Iterate from start to checkUntil
+        let iterDate = new Date(SYSTEM_START_YEAR, SYSTEM_START_MONTH, 1);
+        while (iterDate <= checkUntil) {
+          const monthKey = `${iterDate.getFullYear()}-${String(iterDate.getMonth() + 1).padStart(2, '0')}`;
+          const isPaid = flatPayments.some(p => p.month === monthKey);
+          
+          if (!isPaid) {
+            pending.push({
+              flat: f.flat,
+              month: MONTHS[iterDate.getMonth()],
+              year: iterDate.getFullYear()
+            });
+          }
+          iterDate.setMonth(iterDate.getMonth() + 1);
+        }
+      });
+    }
+    return pending;
+  }, [payments, currentMonth, currentYear, today]);
+
+  return (
+    <div className={cn(
+      "py-4 overflow-hidden whitespace-nowrap relative border-y-2",
+      pendingFlats.length > 0 ? "bg-rose-950/40 border-rose-900/50" : "bg-emerald-950/40 border-emerald-900/50"
+    )}>
+      <div className="flex animate-marquee items-center w-max">
+        {[0, 1, 2].map((set) => (
+          <div key={set} className="flex items-center gap-16 pr-16">
+            {pendingFlats.length > 0 ? (
+              <>
+                <div className="flex items-center gap-4 text-rose-400 font-black text-lg uppercase tracking-widest">
+                  <AlertCircle size={24} />
+                  Pending Dues:
+                </div>
+                {pendingFlats.map((p, i) => (
+                  <span key={i} className="text-neutral-100 text-lg font-bold">
+                    Flat {p.flat} ({p.month} {p.year})
+                  </span>
+                ))}
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-4 text-emerald-400 font-black text-lg uppercase tracking-widest">
+                  <CheckCircle2 size={24} />
+                  All Maintenance Dues are Clear!
+                </div>
+                <span className="text-neutral-100 text-lg font-bold">Great job, everyone!</span>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+function StatCard({ label, value, icon, color, subtitle }: { label: string, value: string, icon?: React.ReactNode, color: string, subtitle?: string }) {
   const colorVariants: Record<string, string> = {
     "blue": "border-blue-900/30 bg-blue-950/10",
     "green": "border-green-900/30 bg-green-950/10",
     "orange": "border-orange-900/30 bg-orange-950/10",
-    "indigo": "border-indigo-900/30 bg-indigo-950/10"
+    "indigo": "border-indigo-900/30 bg-indigo-950/10",
+    "rose": "border-rose-900/30 bg-rose-950/10"
   };
 
-  const iconColorVariants: Record<string, string> = {
-    "blue": "bg-blue-500/10 text-blue-400 border border-blue-500/20",
-    "green": "bg-green-500/10 text-green-400 border border-green-500/20",
-    "orange": "bg-orange-500/10 text-orange-400 border border-orange-500/20",
-    "indigo": "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20"
+  const valueColorVariants: Record<string, string> = {
+    "blue": "text-blue-400",
+    "green": "text-green-400",
+    "orange": "text-orange-400",
+    "indigo": "text-indigo-400",
+    "rose": "text-rose-400"
   };
 
   return (
-    <div className={cn("p-6 rounded-3xl border shadow-sm flex items-center gap-4 transition-all hover:shadow-lg hover:border-neutral-700", colorVariants[color] || "bg-neutral-900 border-neutral-800")}>
-      <div className={cn("w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm", iconColorVariants[color] || "bg-neutral-800 text-neutral-400")}>
-        {icon}
+    <div className={cn(
+      "p-6 rounded-3xl border shadow-sm flex flex-col gap-2 transition-all hover:shadow-lg hover:border-neutral-700", 
+      colorVariants[color] || "bg-neutral-900 border-neutral-800"
+    )}>
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">{label}</p>
+        {icon && <div className="text-neutral-500">{icon}</div>}
       </div>
-      <div>
-        <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider mb-1">{label}</p>
-        <p className="text-3xl font-black text-neutral-100">{value}</p>
-      </div>
+      <p className={cn("text-3xl font-black", valueColorVariants[color] || "text-neutral-100")}>{value}</p>
+      {subtitle && <p className="text-[10px] font-bold text-neutral-600 uppercase tracking-widest mt-1">{subtitle}</p>}
+    </div>
+  );
+}
+
+function Directory({ users }: { users: UserProfile[] }) {
+  const committeeMembers = [
+    { name: 'SINDHU V', role: 'PRESIDENT', phone: '9846175556' },
+    { name: 'JAYAN K R', role: 'SECRETARY', phone: '7012128339' },
+    { name: 'USHA G MENON', role: 'TREASURER', phone: '9746701449' }
+  ];
+
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const filteredUsers = users.filter(user => 
+    user.displayName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    user.flatNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    user.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (user.phone || '').includes(searchTerm)
+  ).sort((a, b) => (a.flatNumber || '').localeCompare(b.flatNumber || '', undefined, { numeric: true }));
+
+  return (
+    <div className="space-y-8">
+      <header>
+        <h2 className="text-2xl font-bold text-white mb-2">Apartment Directory</h2>
+        <p className="text-neutral-500">Contact information for committee members, owners, and tenants.</p>
+      </header>
+
+      {/* Committee Members */}
+      <section className="space-y-4">
+        <h3 className="text-lg font-bold text-indigo-400 flex items-center gap-2">
+          <ShieldCheck size={20} />
+          Committee Members
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {committeeMembers.map((member, idx) => (
+            <div key={idx} className="bg-neutral-900/50 border border-neutral-800 p-6 rounded-3xl hover:border-indigo-500/30 transition-all group">
+              <div className="flex items-start justify-between mb-4">
+                <div className="w-12 h-12 bg-indigo-500/10 rounded-2xl flex items-center justify-center text-indigo-400 group-hover:bg-indigo-500 group-hover:text-white transition-all">
+                  <UserIcon size={24} />
+                </div>
+                <span className="px-3 py-1 bg-indigo-500/10 text-indigo-400 text-[10px] font-bold uppercase tracking-widest rounded-full">
+                  {member.role}
+                </span>
+              </div>
+              <h4 className="text-lg font-bold text-white mb-1">{member.name}</h4>
+              <div className="flex items-center gap-2 text-neutral-400">
+                <Phone size={14} />
+                <a href={`tel:${member.phone}`} className="text-sm hover:text-indigo-400 transition-colors">
+                  {member.phone}
+                </a>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Owner & Tenant List */}
+      <section className="space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <h3 className="text-lg font-bold text-emerald-400 flex items-center gap-2">
+            <Users size={20} />
+            Owners & Tenants
+          </h3>
+          <div className="relative w-full md:w-72">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-500" size={18} />
+            <input 
+              type="text"
+              placeholder="Search by name, flat, or phone..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-12 pr-4 py-3 bg-neutral-900 border border-neutral-800 rounded-2xl text-white placeholder:text-neutral-600 focus:outline-none focus:border-emerald-500 transition-all"
+            />
+          </div>
+        </div>
+
+        <div className="bg-neutral-900/50 border border-neutral-800 rounded-3xl overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse min-w-[1000px]">
+              <thead>
+                <tr className="bg-neutral-900 border-b border-neutral-800">
+                  <th className="px-6 py-4 text-xs font-bold text-neutral-500 uppercase tracking-widest">Flat</th>
+                  <th className="px-6 py-4 text-xs font-bold text-neutral-500 uppercase tracking-widest">Owner Name</th>
+                  <th className="px-6 py-4 text-xs font-bold text-neutral-500 uppercase tracking-widest">Owner Phone</th>
+                  <th className="px-6 py-4 text-xs font-bold text-neutral-500 uppercase tracking-widest">Tenant Details</th>
+                  <th className="px-6 py-4 text-xs font-bold text-neutral-500 uppercase tracking-widest">Email ID</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-neutral-800">
+                {filteredUsers.length > 0 ? (
+                  filteredUsers.map((user) => {
+                    const cleanFlat = (user.flatNumber || '')
+                      .replace(/[^a-zA-Z0-9]/g, '')
+                      .replace(/([a-zA-Z])0+/, '$1')
+                      .toUpperCase();
+                    
+                    const ownerPhone = user.phone || OWNER_PHONE_MAPPING[cleanFlat] || 'N/A';
+                    const tenant = TENANT_MAPPING[cleanFlat];
+
+                    return (
+                      <tr key={user.uid} className="hover:bg-neutral-800/30 transition-colors group">
+                        <td className="px-6 py-4">
+                          <span className="text-xl font-black text-emerald-400 tracking-tight">
+                            {user.flatNumber || 'N/A'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-3">
+                            <img src={user.photoURL} className="w-10 h-10 rounded-full border border-neutral-800 shadow-sm" alt="" />
+                            <span className="text-lg font-bold text-neutral-100 group-hover:text-emerald-400 transition-colors">{user.displayName}</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-2 text-neutral-200">
+                            <Phone size={14} className="text-neutral-500" />
+                            <a href={`tel:${ownerPhone}`} className="text-base font-bold hover:text-emerald-400 transition-colors">
+                              {ownerPhone}
+                            </a>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          {tenant ? (
+                            <div className="flex flex-col gap-1">
+                              <span className="text-sm font-bold text-indigo-400 uppercase tracking-wider">{tenant.name}</span>
+                              <div className="flex items-center gap-2 text-neutral-400">
+                                <Phone size={12} className="text-neutral-600" />
+                                <a href={`tel:${tenant.phone}`} className="text-xs font-semibold hover:text-indigo-400 transition-colors">
+                                  {tenant.phone}
+                                </a>
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-neutral-600 italic">Self Occupied</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-2 text-neutral-400">
+                            <FileText size={14} className="text-neutral-600" />
+                            <span className="text-sm font-medium">{user.email}</span>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-12 text-center text-neutral-500">
+                      No entries found matching your search.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
@@ -1792,6 +3254,7 @@ function UserManagement({ users, currentUser, isSuperAdmin, isAdmin }: { users: 
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   const [flatNumber, setFlatNumber] = useState('');
   const [editName, setEditName] = useState('');
+  const [editPhone, setEditPhone] = useState('');
   const [copying, setCopying] = useState(false);
   
   // Create User Form State
@@ -1799,6 +3262,7 @@ function UserManagement({ users, currentUser, isSuperAdmin, isAdmin }: { users: 
   const [newEmail, setNewEmail] = useState('');
   const [newName, setNewName] = useState('');
   const [newFlat, setNewFlat] = useState('');
+  const [newPhone, setNewPhone] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState<UserRole>('owner');
   const [hasNoEmail, setHasNoEmail] = useState(false);
@@ -1806,6 +3270,15 @@ function UserManagement({ users, currentUser, isSuperAdmin, isAdmin }: { users: 
   const [createError, setCreateError] = useState('');
   const [deletingUser, setDeletingUser] = useState<UserProfile | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [resettingUser, setResettingUser] = useState<UserProfile | null>(null);
+  const [resetPassword, setResetPassword] = useState('');
+  const [isResetting, setIsResetting] = useState(false);
+  const [transferringUser, setTransferringUser] = useState<UserProfile | null>(null);
+  const [transferName, setTransferName] = useState('');
+  const [transferEmail, setTransferEmail] = useState('');
+  const [transferPassword, setTransferPassword] = useState('');
+  const [transferNoEmail, setTransferNoEmail] = useState(false);
+  const [isTransferring, setIsTransferring] = useState(false);
   const [confirmingRoleChange, setConfirmingRoleChange] = useState<{ user: UserProfile, newRole: UserRole } | null>(null);
 
   const sortedUsers = useMemo(() => {
@@ -1861,9 +3334,11 @@ function UserManagement({ users, currentUser, isSuperAdmin, isAdmin }: { users: 
         photoURL: `https://ui-avatars.com/api/?name=${encodeURIComponent(newName)}&background=random`,
         role: newRole,
         flatNumber: newFlat,
+        phone: newPhone,
         createdAt: serverTimestamp(),
         mustChangePassword: true,
-        hasNoEmail: hasNoEmail
+        hasNoEmail: hasNoEmail,
+        tempPassword: newPassword // Store temp password for admin reference
       });
 
       // 3. Clean up secondary app
@@ -1876,9 +3351,9 @@ function UserManagement({ users, currentUser, isSuperAdmin, isAdmin }: { users: 
       setNewPassword('');
       setNewRole('owner');
       setHasNoEmail(false);
-      toast.success('Resident created successfully!');
+      toast.success('Owner created successfully!');
     } catch (err: any) {
-      setCreateError(err.message || 'Failed to create resident');
+      setCreateError(err.message || 'Failed to create owner');
     } finally {
       setCreating(false);
     }
@@ -1889,11 +3364,13 @@ function UserManagement({ users, currentUser, isSuperAdmin, isAdmin }: { users: 
       await updateDoc(doc(db, 'users', uid), { 
         displayName: editName,
         flatNumber: flatNumber,
+        phone: editPhone,
         role: currentRole // Keep role for now, or add role select if needed
       });
       setEditingUser(null);
       setFlatNumber('');
       setEditName('');
+      setEditPhone('');
     } catch (error) {
       console.error("Update failed:", error);
     }
@@ -1922,8 +3399,55 @@ function UserManagement({ users, currentUser, isSuperAdmin, isAdmin }: { users: 
     }
   };
 
+  const handleTransferOwnership = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!transferringUser) return;
+    setIsTransferring(true);
+    try {
+      const flat = transferringUser.flatNumber;
+      if (!flat) throw new Error("User has no flat number");
+
+      // 1. Create new user
+      const secondaryApp = initializeApp(config, 'Transfer');
+      const secondaryAuth = getAuth(secondaryApp);
+      const emailToUse = transferNoEmail ? `${flat.replace(/\s+/g, '').toLowerCase()}@whitepalace.internal` : transferEmail;
+      
+      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, emailToUse, transferPassword);
+      const newUid = userCredential.user.uid;
+
+      // 2. Create new Firestore profile
+      await setDoc(doc(db, 'users', newUid), {
+        uid: newUid,
+        email: emailToUse,
+        displayName: transferName,
+        photoURL: `https://ui-avatars.com/api/?name=${encodeURIComponent(transferName)}&background=random`,
+        role: 'owner',
+        flatNumber: flat,
+        createdAt: serverTimestamp(),
+        mustChangePassword: true,
+        hasNoEmail: transferNoEmail,
+        tempPassword: transferPassword
+      });
+
+      // 3. Delete old user profile
+      await deleteDoc(doc(db, 'users', transferringUser.uid));
+
+      // Note: Payments are linked by flatNumber, so they stay visible to the new owner.
+
+      await deleteApp(secondaryApp);
+      setTransferringUser(null);
+      toast.success(`Ownership of ${flat} transferred to ${transferName}`);
+    } catch (error: any) {
+      console.error("Transfer failed:", error);
+      toast.error(error.message || "Transfer failed");
+    } finally {
+      setIsTransferring(false);
+    }
+  };
+
   const copyLink = () => {
-    navigator.clipboard.writeText(window.location.origin);
+    const origin = window.location.origin.replace('-dev-', '-pre-');
+    navigator.clipboard.writeText(origin);
     setCopying(true);
     setTimeout(() => setCopying(false), 2000);
   };
@@ -1932,8 +3456,8 @@ function UserManagement({ users, currentUser, isSuperAdmin, isAdmin }: { users: 
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-neutral-100">Resident Management</h2>
-          <p className="text-sm text-neutral-500">Manage flat assignments and roles for all residents.</p>
+          <h2 className="text-2xl font-bold text-neutral-100">Owner Management</h2>
+          <p className="text-sm text-neutral-500">Manage flat assignments and roles for all owners.</p>
         </div>
         
         {isAdmin && (
@@ -1943,7 +3467,7 @@ function UserManagement({ users, currentUser, isSuperAdmin, isAdmin }: { users: 
               className="px-6 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-2xl font-bold flex items-center gap-2 hover:from-emerald-700 hover:to-teal-700 transition-all shadow-lg shadow-emerald-900/20"
             >
               <Plus size={20} />
-              Create Resident
+              Create Owner
             </button>
 
             {isSuperAdmin && (
@@ -1951,20 +3475,20 @@ function UserManagement({ users, currentUser, isSuperAdmin, isAdmin }: { users: 
                 <button 
                   onClick={() => {
                     toast.promise(new Promise(resolve => setTimeout(resolve, 800)), {
-                      loading: 'Syncing residents...',
-                      success: 'Resident list synced successfully',
-                      error: 'Failed to sync residents',
+                      loading: 'Syncing owners...',
+                      success: 'Owner list synced successfully',
+                      error: 'Failed to sync owners',
                     });
                   }}
                   className="px-4 py-3 bg-neutral-800 text-neutral-300 rounded-2xl font-bold flex items-center gap-2 hover:bg-neutral-700 transition-all border border-neutral-700"
                 >
                   <RefreshCw size={18} />
-                  Sync Residents
+                  Sync Owners
                 </button>
                 
                 <div className="bg-neutral-900 p-4 rounded-2xl border border-neutral-800 shadow-sm flex items-center gap-4">
                   <div className="flex flex-col">
-                    <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">Invite Residents</span>
+                    <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">Invite Owners</span>
                     <span className="text-xs font-mono text-neutral-400 truncate max-w-[150px]">{window.location.origin}</span>
                   </div>
                   <button 
@@ -1993,7 +3517,7 @@ function UserManagement({ users, currentUser, isSuperAdmin, isAdmin }: { users: 
           >
             <div className="bg-neutral-900 p-8 rounded-3xl border border-neutral-800 shadow-sm">
               <div className="flex items-center justify-between mb-6">
-                <h3 className="text-xl font-bold text-neutral-100">Create New Resident Account</h3>
+                <h3 className="text-xl font-bold text-neutral-100">Create New Owner Account</h3>
                 <button onClick={() => setShowCreate(false)} className="text-neutral-500 hover:text-neutral-300">
                   <AlertCircle size={24} className="rotate-45" />
                 </button>
@@ -2039,7 +3563,7 @@ function UserManagement({ users, currentUser, isSuperAdmin, isAdmin }: { users: 
                     />
                     {hasNoEmail && (
                       <p className="mt-1.5 text-[10px] text-neutral-500 italic">
-                        An internal email will be generated for this resident.
+                        An internal email will be generated for this owner.
                       </p>
                     )}
                   </div>
@@ -2069,13 +3593,23 @@ function UserManagement({ users, currentUser, isSuperAdmin, isAdmin }: { users: 
                     />
                   </div>
                   <div>
+                    <label className="block text-xs font-bold text-neutral-500 uppercase mb-2">Phone Number</label>
+                    <input 
+                      type="tel" 
+                      value={newPhone}
+                      onChange={(e) => setNewPhone(e.target.value)}
+                      className="w-full px-4 py-3 bg-neutral-800 border border-neutral-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100 placeholder:text-neutral-600"
+                      placeholder="9847448093"
+                    />
+                  </div>
+                  <div>
                     <label className="block text-xs font-bold text-neutral-500 uppercase mb-2">Account Role</label>
                     <select 
                       value={newRole}
                       onChange={(e) => setNewRole(e.target.value as UserRole)}
                       className="w-full px-4 py-3 bg-neutral-800 border border-neutral-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100"
                     >
-                      <option value="owner">Owner (Resident)</option>
+                      <option value="owner">Owner</option>
                       <option value="admin">Admin (Staff)</option>
                     </select>
                   </div>
@@ -2110,8 +3644,9 @@ function UserManagement({ users, currentUser, isSuperAdmin, isAdmin }: { users: 
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-neutral-800/50 border-b border-neutral-800">
-              <th className="px-6 py-4 text-xs font-bold text-neutral-500 uppercase tracking-wider">Resident</th>
+              <th className="px-6 py-4 text-xs font-bold text-neutral-500 uppercase tracking-wider">Owner</th>
               <th className="px-6 py-4 text-xs font-bold text-neutral-500 uppercase tracking-wider">Flat</th>
+              {isAdmin && <th className="px-6 py-4 text-xs font-bold text-neutral-500 uppercase tracking-wider">Login Credentials</th>}
               {isSuperAdmin && <th className="px-6 py-4 text-xs font-bold text-neutral-500 uppercase tracking-wider">Role</th>}
               {isAdmin && <th className="px-6 py-4 text-xs font-bold text-neutral-500 uppercase tracking-wider text-right">Actions</th>}
             </tr>
@@ -2124,20 +3659,51 @@ function UserManagement({ users, currentUser, isSuperAdmin, isAdmin }: { users: 
                     <img src={user.photoURL} className="w-10 h-10 rounded-full border border-neutral-800" alt="" />
                     <div>
                       {isAdmin && editingUser?.uid === user.uid ? (
-                        <input 
-                          type="text" 
-                          value={editName} 
-                          onChange={(e) => setEditName(e.target.value)}
-                          placeholder="Full Name"
-                          className="w-full px-3 py-1 bg-neutral-800 border-neutral-700 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100 mb-1"
-                        />
+                        <div className="space-y-2">
+                          <input 
+                            type="text" 
+                            value={editName} 
+                            onChange={(e) => setEditName(e.target.value)}
+                            placeholder="Full Name"
+                            className="w-full px-3 py-1 bg-neutral-800 border-neutral-700 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100"
+                          />
+                          <input 
+                            type="tel" 
+                            value={editPhone} 
+                            onChange={(e) => setEditPhone(e.target.value)}
+                            placeholder="Phone Number"
+                            className="w-full px-3 py-1 bg-neutral-800 border-neutral-700 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100"
+                          />
+                        </div>
                       ) : (
-                        <p className="font-bold text-neutral-100">{user.displayName}</p>
+                        <div>
+                          <p className="font-bold text-neutral-100">{user.displayName}</p>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <Phone size={10} className="text-emerald-500" />
+                            <p className="text-[10px] text-emerald-500 font-bold tracking-wider">{user.phone || OWNER_PHONE_MAPPING[extractFlatNumber(user.flatNumber || '')] || 'No Phone'}</p>
+                          </div>
+                        </div>
                       )}
-                      <p className="text-xs text-neutral-500">{user.email}</p>
+                      <p className="text-xs text-neutral-500 truncate max-w-[150px]">{user.email}</p>
                     </div>
                   </div>
                 </td>
+                {isAdmin && (
+                  <td className="px-6 py-4">
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider">ID:</span>
+                        <span className="text-xs font-mono text-neutral-300">{user.flatNumber || 'N/A'}</span>
+                      </div>
+                      {user.tempPassword && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider">Pass:</span>
+                          <span className="text-xs font-mono text-neutral-300">{user.tempPassword}</span>
+                        </div>
+                      )}
+                    </div>
+                  </td>
+                )}
                 <td className="px-6 py-4">
                   {isAdmin && editingUser?.uid === user.uid ? (
                     <input 
@@ -2187,16 +3753,29 @@ function UserManagement({ users, currentUser, isSuperAdmin, isAdmin }: { users: 
                             setEditingUser(user);
                             setFlatNumber(user.flatNumber || '');
                             setEditName(user.displayName || '');
+                            setEditPhone(user.phone || '');
                           }} 
                           className="text-neutral-500 hover:text-neutral-100 transition-colors font-medium text-sm"
                         >
                           Edit Profile
                         </button>
+                        <button 
+                          onClick={() => {
+                            setTransferName('');
+                            setTransferEmail('');
+                            setTransferPassword('');
+                            setTransferNoEmail(user.hasNoEmail || false);
+                            setTransferringUser(user);
+                          }}
+                          className="text-emerald-500 hover:text-emerald-400 transition-colors font-medium text-sm"
+                        >
+                          Transfer
+                        </button>
                         {isSuperAdmin && user.uid !== currentUser.uid && (
                           <button 
                             onClick={() => setDeletingUser(user)}
                             className="text-neutral-500 hover:text-red-400 transition-all p-2 hover:bg-red-900/20 rounded-lg group"
-                            title="Delete Resident"
+                            title="Delete Owner"
                           >
                             <Trash2 size={16} className="group-hover:scale-110 transition-transform" />
                           </button>
@@ -2221,7 +3800,7 @@ function UserManagement({ users, currentUser, isSuperAdmin, isAdmin }: { users: 
             <div className="w-16 h-16 bg-rose-900/30 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-4">
               <AlertCircle size={32} />
             </div>
-            <h3 className="text-xl font-bold text-neutral-100 mb-2">Delete Resident</h3>
+            <h3 className="text-xl font-bold text-neutral-100 mb-2">Delete Owner</h3>
             <p className="text-neutral-500 mb-8">
               Are you sure you want to delete <span className="text-neutral-200 font-bold">{deletingUser.displayName}</span>? 
               This action cannot be undone and will remove all their profile data.
@@ -2249,6 +3828,102 @@ function UserManagement({ users, currentUser, isSuperAdmin, isAdmin }: { users: 
           </motion.div>
         </div>
       )}
+
+      <AnimatePresence>
+        {transferringUser && (
+          <div className="fixed inset-0 bg-neutral-950/80 backdrop-blur-md flex items-center justify-center p-4 z-[110]">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="max-w-md w-full bg-neutral-900 p-8 rounded-3xl shadow-2xl border border-neutral-800"
+            >
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-12 h-12 bg-emerald-600/20 rounded-xl flex items-center justify-center text-emerald-500">
+                  <RefreshCw size={24} />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-neutral-100">Transfer Ownership</h3>
+                  <p className="text-xs text-neutral-500">Flat {transferringUser.flatNumber}</p>
+                </div>
+              </div>
+
+              <p className="text-sm text-neutral-400 mb-6 leading-relaxed">
+                This will create a new account for the new owner of <strong>Flat {transferringUser.flatNumber}</strong>. 
+                The previous owner's account will be removed, but the payment history will remain linked to the flat.
+              </p>
+
+              <form onSubmit={handleTransferOwnership} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-neutral-500 uppercase mb-2">New Owner Name</label>
+                  <input 
+                    type="text" 
+                    required
+                    value={transferName}
+                    onChange={(e) => setTransferName(e.target.value)}
+                    className="w-full px-4 py-3 bg-neutral-800 border border-neutral-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100"
+                    placeholder="e.g. Jane Smith"
+                  />
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-xs font-bold text-neutral-500 uppercase">New Email Address</label>
+                    <label className="flex items-center gap-2 cursor-pointer group">
+                      <input 
+                        type="checkbox" 
+                        checked={transferNoEmail}
+                        onChange={(e) => setTransferNoEmail(e.target.checked)}
+                        className="w-4 h-4 rounded border-neutral-700 bg-neutral-800 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider">No Email</span>
+                    </label>
+                  </div>
+                  <input 
+                    type="email" 
+                    required={!transferNoEmail}
+                    disabled={transferNoEmail}
+                    value={transferNoEmail ? `${transferringUser.flatNumber?.replace(/\s+/g, '').toLowerCase()}@whitepalace.internal` : transferEmail}
+                    onChange={(e) => setTransferEmail(e.target.value)}
+                    className={cn(
+                      "w-full px-4 py-3 bg-neutral-800 border border-neutral-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100 placeholder:text-neutral-600 transition-all",
+                      transferNoEmail && "opacity-50 cursor-not-allowed"
+                    )}
+                    placeholder={transferNoEmail ? "Auto-generated internal email" : "jane@example.com"}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-neutral-500 uppercase mb-2">New Temporary Password</label>
+                  <input 
+                    type="text" 
+                    required
+                    value={transferPassword}
+                    onChange={(e) => setTransferPassword(e.target.value)}
+                    className="w-full px-4 py-3 bg-neutral-800 border border-neutral-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100"
+                    placeholder="Set a temporary password"
+                  />
+                </div>
+
+                <div className="flex items-center gap-3 pt-4">
+                  <button 
+                    type="button"
+                    onClick={() => setTransferringUser(null)}
+                    className="flex-1 py-3 text-neutral-500 font-bold hover:text-neutral-300"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    type="submit"
+                    disabled={isTransferring}
+                    className="flex-1 py-3 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700 transition-all disabled:opacity-50"
+                  >
+                    {isTransferring ? 'Transferring...' : 'Confirm Transfer'}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {confirmingRoleChange && (
@@ -2466,23 +4141,109 @@ function PaymentReport({ accounts, payments, residents, isAdmin, isSuperAdmin }:
   const [deletingPayment, setDeletingPayment] = useState(false);
   
   const owners = useMemo(() => {
-    return residents
-      .filter(r => r.role === 'owner')
-      .sort((a, b) => (a.flatNumber || '').localeCompare(b.flatNumber || '', undefined, { numeric: true, sensitivity: 'base' }));
+    if (!residents || residents.length === 0) {
+      return ALL_FLATS.map(f => ({
+        uid: `temp-${f.flat}`,
+        displayName: f.name.toUpperCase(),
+        flatNumber: f.flat,
+        role: 'owner' as UserRole
+      }));
+    }
+
+    // Create a map of registered owners by flat number
+    const registeredOwners = new Map(
+      residents
+        .filter(r => r.role === 'owner')
+        .map(r => [normalizeFlat(r.flatNumber), r])
+    );
+
+    // Merge with master list of flats
+    return ALL_FLATS.map(f => {
+      const registered = registeredOwners.get(normalizeFlat(f.flat));
+      return {
+        uid: registered?.uid || `temp-${f.flat}`,
+        displayName: (registered?.displayName || f.name).toUpperCase(),
+        flatNumber: f.flat,
+        role: 'owner' as UserRole
+      };
+    });
   }, [residents]);
+
+  const VALID_FLATS = useMemo(() => new Set(ALL_FLATS.map(f => normalizeFlat(f.flat))), []);
 
   const paymentMap = useMemo(() => {
     const map = new Map<string, Map<string, any>>(); // flat -> "YYYY-MM" -> data
+
+    // 0. Create a map of account dates for quick lookup
+    const accountDates = new Map();
+    accounts.forEach(acc => {
+      const d = acc.date instanceof Date ? acc.date : acc.date?.toDate();
+      if (d) accountDates.set(acc.id, d);
+      // Also store originalPaymentDate for shadow entries
+      const od = acc.originalPaymentDate instanceof Date ? acc.originalPaymentDate : acc.originalPaymentDate?.toDate();
+      if (od) accountDates.set(acc.id, od);
+    });
 
     // 1. Process accounts (manual entries)
     accounts.forEach(acc => {
       if (acc.income === 0 && !acc.isAdvanceAllocation) return;
       if (acc.isOpeningBalance || acc.isWithdrawal) return;
 
-      const particulars = acc.particulars;
-      const match = particulars.match(/^([A-Z0-9]+)\s+(.*?)\s*\((.*?)\)$/);
-      const flat = match ? match[1] : (acc.particulars.split(' ')[0] || 'N/A');
+      const particulars = acc.particulars || '';
       
+      let flat = normalizeFlat(acc.flatNumber) || 'N/A';
+      let description = '';
+
+      if (flat === 'N/A' || !VALID_FLATS.has(flat)) {
+        // Try to parse from particulars
+        const match = particulars.match(/^([A-Z]\s\d+)\s+(.*?)\s*\((.*?)\)$/i) || 
+                      particulars.match(/^([A-Z]\d+)\s+(.*?)\s*\((.*?)\)$/i) ||
+                      particulars.match(/^([A-Z0-9]+)\s+(.*?)\s*\((.*?)\)$/i);
+        
+        if (match) {
+          flat = normalizeFlat(match[1]);
+          description = match[3];
+        } else {
+          // Fallback: Try to find any flat number from ALL_FLATS in the particulars
+          const foundFlat = ALL_FLATS.find(f => 
+            particulars.startsWith(f.flat) ||
+            particulars.includes(` ${f.flat} `)
+          );
+          
+          if (foundFlat) {
+            flat = normalizeFlat(foundFlat.flat);
+          } else {
+            // Check if the first word is a valid flat
+            const firstWord = normalizeFlat(particulars.split(' ')[0]);
+            if (VALID_FLATS.has(firstWord)) {
+              flat = firstWord;
+            } else {
+              flat = 'N/A';
+            }
+          }
+          
+          // Try to extract description from parentheses if present
+          const parenMatch = particulars.match(/\((.*?)\)/);
+          description = parenMatch ? parenMatch[1] : particulars;
+        }
+      } else {
+        // Use explicit flatNumber and extract description from particulars
+        const parenMatch = particulars.match(/\((.*?)\)/);
+        description = parenMatch ? parenMatch[1] : particulars;
+      }
+      
+      // Final check for valid flat
+      if (!VALID_FLATS.has(flat)) return;
+      
+      // Only include if it's likely a maintenance payment
+      const isMaintenance = 
+        acc.isAdvanceAllocation || 
+        particulars.toLowerCase().includes('maintenance') || 
+        MONTHS.some(m => particulars.toUpperCase().includes(m)) ||
+        description.toLowerCase().includes('maintenance');
+
+      if (!isMaintenance && acc.income > 0) return;
+
       if (!map.has(flat)) map.set(flat, new Map());
       const flatMap = map.get(flat)!;
 
@@ -2499,19 +4260,21 @@ function PaymentReport({ accounts, payments, residents, isAdmin, isSuperAdmin }:
             date: acc.originalPaymentDate?.toDate() || null,
             source: 'Manual (Advance)',
             particulars: acc.particulars,
-            period: `${acc.forMonth} ${acc.forYear}`
+            period: `${acc.forMonth} ${acc.forYear}`,
+            collection: 'accounts',
+            parentAccountId: acc.parentAccountId,
+            installmentIndex: acc.installmentIndex,
+            totalInstallments: acc.totalInstallments
           });
         }
       } else if (acc.income > 0) {
         // Main entries might cover multiple months. 
-        // We need to figure out which months they cover.
-        const description = match ? match[3] : '';
         if (description.includes(' to ')) {
           // Range payment: e.g. "JAN to MAR"
           const parts = description.replace('Advance: ', '').split(' to ');
-          const fromMonth = parts[0].split(' ')[0];
-          const toMonth = parts[1].split(' ')[0];
-          const year = parseInt(parts[1].split(' ')[1]) || dateObj?.getFullYear() || selectedYear;
+          const fromMonth = parts[0].trim().split(' ')[0];
+          const toMonth = parts[1].trim().split(' ')[0];
+          const year = parseInt(parts[1].trim().split(' ')[1]) || dateObj?.getFullYear() || selectedYear;
           
           const startIdx = MONTHS.indexOf(fromMonth);
           const endIdx = MONTHS.indexOf(toMonth);
@@ -2531,15 +4294,17 @@ function PaymentReport({ accounts, payments, residents, isAdmin, isSuperAdmin }:
                   date: dateObj,
                   source: 'Manual',
                   particulars: acc.particulars,
-                  period: description
+                  period: description,
+                  collection: 'accounts'
                 });
               }
             }
           }
         } else {
           // Single month payment
-          const monthPart = description.split(' ')[0];
-          const yearPart = parseInt(description.split(' ')[1]) || dateObj?.getFullYear() || selectedYear;
+          const descParts = description.trim().split(' ');
+          const monthPart = descParts[0];
+          const yearPart = parseInt(descParts[1]) || dateObj?.getFullYear() || selectedYear;
           const mIdx = MONTHS.indexOf(monthPart);
           if (mIdx !== -1) {
             const key = `${yearPart}-${String(mIdx).padStart(2, '0')}`;
@@ -2549,7 +4314,8 @@ function PaymentReport({ accounts, payments, residents, isAdmin, isSuperAdmin }:
               date: dateObj,
               source: 'Manual',
               particulars: acc.particulars,
-              period: description
+              period: description,
+              collection: 'accounts'
             });
           } else if (dateObj) {
             // Fallback to payment date if description parsing fails
@@ -2561,7 +4327,8 @@ function PaymentReport({ accounts, payments, residents, isAdmin, isSuperAdmin }:
                 date: dateObj,
                 source: 'Manual',
                 particulars: acc.particulars,
-                period: description
+                period: description,
+                collection: 'accounts'
               });
             }
           }
@@ -2571,40 +4338,82 @@ function PaymentReport({ accounts, payments, residents, isAdmin, isSuperAdmin }:
 
     // 2. Process online payments
     payments.forEach(p => {
-      if (p.status !== 'paid') return;
-      const flat = p.flatNumber;
+      if (p.status !== 'paid' && p.status !== 'PAID') return;
+      const flat = normalizeFlat(p.flatNumber);
       if (!map.has(flat)) map.set(flat, new Map());
       const flatMap = map.get(flat)!;
 
       const [year, month] = p.month.split('-').map(Number);
       const key = `${year}-${String(month - 1).padStart(2, '0')}`;
       
-      const dateObj = p.paidAt instanceof Date ? p.paidAt : p.paidAt?.toDate() || p.createdAt?.toDate();
+      const dateObjFromAccount = p.parentAccountId ? accountDates.get(p.parentAccountId) : null;
+      const dateObj = dateObjFromAccount || (p.paidAt instanceof Date ? p.paidAt : p.paidAt?.toDate() || p.createdAt?.toDate());
 
       flatMap.set(key, {
         id: p.id,
         amount: p.amount,
         date: dateObj,
-        source: 'Online',
-        particulars: `Online Payment - Ref: ${p.transactionId || 'N/A'}`,
-        period: format(new Date(p.month + '-01'), 'MMMM yyyy')
+        source: p.source || 'Online',
+        particulars: p.particulars || `Online Payment - Ref: ${p.transactionId || 'N/A'}`,
+        period: format(new Date(p.month + '-01'), 'MMMM yyyy'),
+        collection: 'payments',
+        parentAccountId: p.parentAccountId,
+        installmentIndex: p.installmentIndex,
+        totalInstallments: p.totalInstallments
       });
     });
 
     return map;
-  }, [accounts, payments]);
+  }, [accounts, payments, selectedYear]);
 
   const handleDeletePayment = async () => {
     if (!selectedPayment || !selectedPayment.id) return;
     setDeletingPayment(true);
     try {
-      const collectionName = selectedPayment.source === 'Online' ? 'payments' : 'accounts';
-      await deleteDoc(doc(db, collectionName, selectedPayment.id));
-      toast.success(`${selectedPayment.source === 'Online' ? 'Payment' : 'Account'} record deleted successfully`);
+      // 1. Determine primary record to delete
+      const primaryId = selectedPayment.id;
+      const primaryCollection = selectedPayment.collection || (selectedPayment.source === 'Online' ? 'payments' : 'accounts');
+      
+      // 2. Find linked records
+      let linkedAccountId = null;
+      let linkedPaymentId = null;
+      
+      if (primaryCollection === 'payments') {
+        linkedPaymentId = primaryId;
+        linkedAccountId = selectedPayment.parentAccountId;
+      } else {
+        linkedAccountId = primaryId;
+        // Search for linked payment
+        const qP = query(collection(db, 'payments'), where('parentAccountId', '==', primaryId));
+        const pSnap = await getDocs(qP);
+        if (!pSnap.empty) linkedPaymentId = pSnap.docs[0].id;
+      }
+
+      // 3. Perform deletions
+      if (linkedAccountId) {
+        await deleteDoc(doc(db, 'accounts', linkedAccountId));
+        // Delete shadow entries
+        const qS = query(collection(db, 'accounts'), where('parentAccountId', '==', linkedAccountId));
+        const sSnap = await getDocs(qS);
+        for (const d of sSnap.docs) await deleteDoc(doc(db, 'accounts', d.id));
+      }
+      
+      if (linkedPaymentId) {
+        await deleteDoc(doc(db, 'payments', linkedPaymentId));
+      }
+
+      // 4. Fallback: if it was a manual entry without parentAccountId linkage
+      if (primaryCollection === 'accounts' && primaryId !== linkedAccountId) {
+        await deleteDoc(doc(db, 'accounts', primaryId));
+      } else if (primaryCollection === 'payments' && primaryId !== linkedPaymentId) {
+        await deleteDoc(doc(db, 'payments', primaryId));
+      }
+
+      toast.success("Payment record and associated entries deleted");
       setSelectedPayment(null);
     } catch (err) {
       console.error("Error deleting record:", err);
-      handleFirestoreError(err, OperationType.DELETE, `${selectedPayment.source === 'Online' ? 'payments' : 'accounts'}/${selectedPayment.id}`);
+      handleFirestoreError(err, OperationType.DELETE, `records/${selectedPayment.id}`);
     } finally {
       setDeletingPayment(false);
     }
@@ -2617,12 +4426,122 @@ function PaymentReport({ accounts, payments, residents, isAdmin, isSuperAdmin }:
   const SYSTEM_START_MONTH = 2; // March
   const SYSTEM_START_YEAR = 2026;
 
+  const handleDownloadReceipt = () => {
+    if (!selectedPayment) return;
+    const owner = residents.find(r => normalizeFlat(r.flatNumber) === normalizeFlat(selectedPayment.flat));
+    const ownerName = (owner?.displayName || selectedPayment.flat).toUpperCase();
+
+    const receiptHtml = `
+      <html>
+        <head>
+          <title>Receipt - ${selectedPayment.flat} - ${selectedPayment.monthName} ${selectedPayment.year}</title>
+          <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+            body { font-family: 'Inter', sans-serif; padding: 40px; color: #1a1a1a; line-height: 1.5; }
+            .receipt-container { max-width: 700px; margin: 0 auto; border: 1px solid #e5e7eb; padding: 50px; border-radius: 24px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); }
+            .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #f3f4f6; padding-bottom: 30px; margin-bottom: 40px; }
+            .header-left h1 { margin: 0; font-size: 28px; font-weight: 800; color: #4f46e5; letter-spacing: -0.025em; }
+            .header-left p { margin: 4px 0 0; color: #6b7280; font-size: 14px; font-weight: 500; }
+            .header-right { text-align: right; }
+            .header-right h2 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; color: #9ca3af; }
+            .header-right p { margin: 4px 0 0; font-size: 18px; font-weight: 700; color: #111827; }
+            
+            .details-grid { display: grid; grid-template-cols: 1fr 1fr; gap: 32px; margin-bottom: 40px; }
+            .detail-item { }
+            .label { font-size: 11px; color: #9ca3af; text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em; margin-bottom: 6px; }
+            .value { font-size: 15px; color: #111827; font-weight: 600; }
+            
+            .amount-card { background: #f9fafb; border: 1px solid #f3f4f6; padding: 32px; border-radius: 20px; text-align: center; margin-bottom: 40px; }
+            .amount-label { font-size: 14px; color: #6b7280; font-weight: 500; margin-bottom: 8px; }
+            .amount-value { font-size: 42px; font-weight: 800; color: #10b981; }
+            
+            .status-stamp { display: inline-block; border: 3px solid #10b981; color: #10b981; padding: 8px 24px; border-radius: 12px; font-size: 24px; font-weight: 800; text-transform: uppercase; transform: rotate(-12deg); margin-top: 10px; opacity: 0.8; }
+            
+            .footer { margin-top: 60px; padding-top: 30px; border-top: 1px solid #f3f4f6; text-align: center; }
+            .footer p { margin: 4px 0; font-size: 12px; color: #9ca3af; }
+            .footer .org { font-weight: 700; color: #4b5563; margin-top: 12px; font-size: 13px; }
+            
+            @media print {
+              body { padding: 0; }
+              .receipt-container { border: none; box-shadow: none; padding: 20px; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="receipt-container">
+            <div class="header">
+              <div class="header-left">
+                <h1>Whitepalace Apartment</h1>
+                <p>Official Maintenance Receipt</p>
+              </div>
+              <div class="header-right">
+                <h2>Receipt Number</h2>
+                <p>#${selectedPayment.id.slice(-8).toUpperCase()}</p>
+              </div>
+            </div>
+            
+            <div class="details-grid">
+              <div class="detail-item">
+                <div class="label">Owner Name</div>
+                <div class="value">${ownerName}</div>
+              </div>
+              <div class="detail-item">
+                <div class="label">Flat Number</div>
+                <div class="value">${selectedPayment.flat}</div>
+              </div>
+              <div class="detail-item">
+                <div class="label">Maintenance Month</div>
+                <div class="value">${selectedPayment.monthName} ${selectedPayment.year}</div>
+              </div>
+              <div class="detail-item">
+                <div class="label">Payment Date</div>
+                <div class="value">${selectedPayment.date ? format(selectedPayment.date, 'PPP p') : 'N/A'}</div>
+              </div>
+              <div class="detail-item">
+                <div class="label">Source</div>
+                <div class="value">${selectedPayment.source}</div>
+              </div>
+              <div class="detail-item">
+                <div class="label">Particulars</div>
+                <div class="value">${selectedPayment.particulars || 'N/A'}</div>
+              </div>
+            </div>
+
+            <div class="amount-card">
+              <div class="amount-label">Total Amount Received</div>
+              <div class="amount-value">₹${selectedPayment.amount.toLocaleString()}</div>
+              <div class="status-stamp">PAID</div>
+            </div>
+
+            <div class="footer">
+              <p>This is a computer-generated receipt and does not require a physical signature.</p>
+              <p>Thank you for your timely maintenance payment.</p>
+              <p class="org">Whitepalace Apartment Owners Association</p>
+            </div>
+          </div>
+          <script>
+            window.onload = () => {
+              window.print();
+              setTimeout(() => window.close(), 500);
+            };
+          </script>
+        </body>
+      </html>
+    `;
+
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(receiptHtml);
+      printWindow.document.close();
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-neutral-100">Maintenance Ledger</h2>
-          <p className="text-sm text-neutral-500">Track monthly payments for all residents.</p>
+          <p className="text-sm text-neutral-500">Track monthly payments for all owners.</p>
         </div>
         
         <div className="flex items-center gap-3">
@@ -2642,12 +4561,20 @@ function PaymentReport({ accounts, payments, residents, isAdmin, isSuperAdmin }:
             </button>
           </div>
           
-          <button 
-            onClick={() => {
+          <div className="flex flex-wrap items-center gap-3">
+            <button 
+              onClick={() => window.location.reload()}
+              className="flex items-center gap-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 px-4 py-2 rounded-xl font-bold text-sm transition-all border border-neutral-700"
+            >
+              <RefreshCw size={18} />
+              Refresh Data
+            </button>
+            <button 
+              onClick={() => {
               const csvContent = "data:text/csv;charset=utf-8," 
-                + "Resident,Flat," + MONTHS.join(",") + "\n"
+                + "Owner,Flat," + MONTHS.join(",") + "\n"
                 + owners.map(o => {
-                  const flatMap = paymentMap.get(o.flatNumber || '') || new Map();
+                  const flatMap = paymentMap.get(normalizeFlat(o.flatNumber) || '') || new Map();
                   const row = MONTHS.map((_, i) => {
                     const key = `${selectedYear}-${String(i).padStart(2, '0')}`;
                     const isFuture = selectedYear > currentYear || (selectedYear === currentYear && i > currentMonth);
@@ -2660,7 +4587,7 @@ function PaymentReport({ accounts, payments, residents, isAdmin, isSuperAdmin }:
                     if (isFuture || isBeforeStart || !isOverdue) return "-";
                     return "PENDING";
                   });
-                  return `"${o.displayName}","${o.flatNumber}",` + row.join(",");
+                  return `"${o.displayName.toUpperCase()}","${o.flatNumber}",` + row.join(",");
                 }).join("\n");
               const encodedUri = encodeURI(csvContent);
               const link = document.createElement("a");
@@ -2677,13 +4604,14 @@ function PaymentReport({ accounts, payments, residents, isAdmin, isSuperAdmin }:
           </button>
         </div>
       </div>
+    </div>
 
-      <div className="bg-neutral-900 rounded-3xl border border-neutral-700 overflow-hidden shadow-sm">
+    <div className="bg-neutral-900 rounded-3xl border border-neutral-700 overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-neutral-800/50">
-                <th className="px-6 py-4 text-[10px] font-bold text-neutral-400 uppercase tracking-widest border-r border-neutral-700 sticky left-0 bg-neutral-900/95 backdrop-blur-sm z-20">Resident</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-neutral-400 uppercase tracking-widest border-r border-neutral-700 sticky left-0 bg-neutral-900/95 backdrop-blur-sm z-20">Owner</th>
                 {MONTHS.map((month, i) => (
                   <th key={month} className="px-2 py-4 text-[11px] font-black text-neutral-400 uppercase tracking-widest text-center border-r border-neutral-700 bg-neutral-800/30">
                     {month}
@@ -2693,7 +4621,7 @@ function PaymentReport({ accounts, payments, residents, isAdmin, isSuperAdmin }:
             </thead>
             <tbody className="divide-y divide-neutral-700">
               {owners.map((owner) => {
-                const flat = owner.flatNumber || '';
+                const flat = normalizeFlat(owner.flatNumber || '');
                 const flatMap = paymentMap.get(flat) || new Map();
                 
                 return (
@@ -2731,11 +4659,15 @@ function PaymentReport({ accounts, payments, residents, isAdmin, isSuperAdmin }:
                         >
                           <div className={cn(
                             "w-full aspect-square rounded-lg flex items-center justify-center transition-all duration-300",
-                            payment ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-[0_0_10px_rgba(16,185,129,0.1)]" : 
-                            isPending ? "bg-rose-500/20 text-rose-400 border border-rose-500/40 shadow-[0_0_10px_rgba(244,63,94,0.1)]" : 
+                            payment ? (
+                              payment.totalInstallments && payment.totalInstallments > 1 ? 
+                              "bg-amber-500/20 text-amber-400 border-2 border-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.2)]" :
+                              "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-[0_0_10px_rgba(16,185,129,0.1)]"
+                            ) : 
+                            isPending ? "bg-rose-500/20 text-rose-400 border-2 border-rose-500 shadow-[0_0_15px_rgba(244,63,94,0.2)] animate-pulse" : 
                             "bg-neutral-800/40 text-neutral-600 border border-neutral-700/30"
                           )}>
-                            {payment ? <Check size={16} strokeWidth={3} /> : isPending ? <AlertCircle size={16} /> : null}
+                            {payment ? <Check size={16} strokeWidth={3} /> : isPending ? <X size={16} strokeWidth={3} className="text-rose-500" /> : null}
                           </div>
 
                           <AnimatePresence>
@@ -2754,9 +4686,15 @@ function PaymentReport({ accounts, payments, residents, isAdmin, isSuperAdmin }:
                                     <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">{MONTHS[i]} {selectedYear}</span>
                                     <span className={cn(
                                       "text-[10px] font-bold px-1.5 py-0.5 rounded",
-                                      payment ? "bg-emerald-500/20 text-emerald-400" : "bg-rose-500/20 text-rose-400"
+                                      payment ? (
+                                        payment.totalInstallments && payment.totalInstallments > 1 ? 
+                                        "bg-amber-500/20 text-amber-400" : 
+                                        "bg-emerald-500/20 text-emerald-400"
+                                      ) : "bg-rose-500/20 text-rose-400"
                                     )}>
-                                      {payment ? 'PAID' : 'PENDING'}
+                                      {payment ? (
+                                        payment.installmentIndex ? `${payment.installmentIndex}/${payment.totalInstallments}` : 'PAID'
+                                      ) : 'PENDING'}
                                     </span>
                                   </div>
                                   
@@ -2766,6 +4704,12 @@ function PaymentReport({ accounts, payments, residents, isAdmin, isSuperAdmin }:
                                         <span className="text-[10px] text-neutral-500">Amount</span>
                                         <span className="text-xs font-bold text-emerald-400">₹{payment.amount.toLocaleString()}</span>
                                       </div>
+                                      {payment.particulars?.match(/\((.*?)\)/) && (
+                                        <div className="flex justify-between items-center">
+                                          <span className="text-[10px] text-neutral-500">Tenant</span>
+                                          <span className="text-xs font-bold text-indigo-400 uppercase">{payment.particulars.match(/\((.*?)\)/)?.[1]}</span>
+                                        </div>
+                                      )}
                                       <div className="flex justify-between items-center">
                                         <span className="text-[10px] text-neutral-500">Date</span>
                                         <span className="text-xs text-neutral-300">{payment.date ? format(payment.date, 'dd MMM yyyy') : 'N/A'}</span>
@@ -2822,7 +4766,7 @@ function PaymentReport({ accounts, payments, residents, isAdmin, isSuperAdmin }:
               <div className="p-6 space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">Resident</p>
+                    <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">Owner</p>
                     <p className="text-sm font-bold text-white">{selectedPayment.flat}</p>
                   </div>
                   <div>
@@ -2853,7 +4797,15 @@ function PaymentReport({ accounts, payments, residents, isAdmin, isSuperAdmin }:
                   </div>
                 )}
                 
-                <div className="pt-4 border-t border-neutral-800">
+                <div className="pt-4 border-t border-neutral-800 space-y-3">
+                  <button
+                    onClick={handleDownloadReceipt}
+                    className="w-full flex items-center justify-center gap-2 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-emerald-900/20"
+                  >
+                    <Download size={18} />
+                    Download Receipt
+                  </button>
+
                   {isSuperAdmin ? (
                     <>
                       <p className="text-xs text-neutral-500 mb-4">
@@ -2924,6 +4876,129 @@ function AccountsManagement({ accounts, residents, payments, isAdmin, isSuperAdm
   });
 
   const months = MONTHS;
+
+  const handleDownloadReceipt = (acc: AccountEntry) => {
+    const flat = extractFlatNumber(acc.particulars);
+    // Use stored ownerName if available, otherwise fall back to current resident (for old records)
+    const owner = residents.find(r => {
+      const rFlat = extractFlatNumber(r.flatNumber || '');
+      return rFlat === flat;
+    });
+    const tenantName = getTenantName(acc.particulars);
+    const ownerName = acc.ownerName || owner?.displayName || flat;
+    const residentName = tenantName ? `${ownerName} (Tenant: ${tenantName})` : ownerName;
+    const dateObj = acc.date instanceof Date ? acc.date : acc.date?.toDate();
+
+    const receiptHtml = `
+      <html>
+        <head>
+          <title>Receipt - ${flat} - ${acc.forMonth} ${acc.forYear}</title>
+          <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+            body { font-family: 'Inter', sans-serif; padding: 40px; color: #1a1a1a; line-height: 1.5; }
+            .receipt-container { max-width: 700px; margin: 0 auto; border: 1px solid #e5e7eb; padding: 50px; border-radius: 24px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); }
+            .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #f3f4f6; padding-bottom: 30px; margin-bottom: 40px; }
+            .header-left h1 { margin: 0; font-size: 28px; font-weight: 800; color: #4f46e5; letter-spacing: -0.025em; }
+            .header-left p { margin: 4px 0 0; color: #6b7280; font-size: 14px; font-weight: 500; }
+            .header-right { text-align: right; }
+            .header-right h2 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; color: #9ca3af; }
+            .header-right p { margin: 4px 0 0; font-size: 18px; font-weight: 700; color: #111827; }
+            
+            .details-grid { display: grid; grid-template-cols: 1fr 1fr; gap: 32px; margin-bottom: 40px; }
+            .detail-item { }
+            .label { font-size: 11px; color: #9ca3af; text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em; margin-bottom: 6px; }
+            .value { font-size: 15px; color: #111827; font-weight: 600; }
+            
+            .amount-card { background: #f9fafb; border: 1px solid #f3f4f6; padding: 32px; border-radius: 20px; text-align: center; margin-bottom: 40px; }
+            .amount-label { font-size: 14px; color: #6b7280; font-weight: 500; margin-bottom: 8px; }
+            .amount-value { font-size: 42px; font-weight: 800; color: #10b981; }
+            
+            .status-stamp { display: inline-block; border: 3px solid #10b981; color: #10b981; padding: 8px 24px; border-radius: 12px; font-size: 24px; font-weight: 800; text-transform: uppercase; transform: rotate(-12deg); margin-top: 10px; opacity: 0.8; }
+            
+            .footer { margin-top: 60px; padding-top: 30px; border-top: 1px solid #f3f4f6; text-align: center; }
+            .footer p { margin: 4px 0; font-size: 12px; color: #9ca3af; }
+            .footer .org { font-weight: 700; color: #4b5563; margin-top: 12px; font-size: 13px; }
+            
+            @media print {
+              body { padding: 0; }
+              .receipt-container { border: none; box-shadow: none; padding: 20px; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="receipt-container">
+            <div class="header">
+              <div class="header-left">
+                <h1>Whitepalace Apartment</h1>
+                <p>Official Maintenance Receipt</p>
+              </div>
+              <div class="header-right">
+                <h2>Receipt Number</h2>
+                <p>#${acc.id.slice(-8).toUpperCase()}</p>
+              </div>
+            </div>
+            
+            <div class="details-grid">
+              <div class="detail-item">
+                <div class="label">Owner Name</div>
+                <div class="value">${residentName}</div>
+              </div>
+              <div class="detail-item">
+                <div class="label">Flat Number</div>
+                <div class="value">${flat}</div>
+              </div>
+              <div class="detail-item">
+                <div class="label">Maintenance Month</div>
+                <div class="value">${(() => {
+                  if (acc.isAdvanceAllocation) {
+                    const d = new Date(acc.forYear || 0, MONTHS.indexOf(acc.forMonth || '') - 1, 1);
+                    return `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+                  }
+                  return `${acc.forMonth} ${acc.forYear}`;
+                })()}</div>
+              </div>
+              <div class="detail-item">
+                <div class="label">Payment Date</div>
+                <div class="value">${dateObj ? format(dateObj, 'PPP p') : 'N/A'}</div>
+              </div>
+              <div class="detail-item">
+                <div class="label">Source</div>
+                <div class="value">Manual Entry</div>
+              </div>
+              <div class="detail-item">
+                <div class="label">Particulars</div>
+                <div class="value">${acc.particulars || 'N/A'}</div>
+              </div>
+            </div>
+
+            <div class="amount-card">
+              <div class="amount-label">Total Amount Received</div>
+              <div class="amount-value">₹${(acc.income || acc.amount || 0).toLocaleString()}</div>
+              <div class="status-stamp">PAID</div>
+            </div>
+
+            <div class="footer">
+              <p>This is a computer-generated receipt and does not require a physical signature.</p>
+              <p>Thank you for your timely maintenance payment.</p>
+              <p class="org">Whitepalace Apartment Owners Association</p>
+            </div>
+          </div>
+          <script>
+            window.onload = () => {
+              window.print();
+              setTimeout(() => window.close(), 500);
+            };
+          </script>
+        </body>
+      </html>
+    `;
+
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(receiptHtml);
+      printWindow.document.close();
+    }
+  };
 
   const balances = useMemo(() => {
     const sortedAll = [...accounts]
@@ -3034,8 +5109,8 @@ function AccountsManagement({ accounts, residents, payments, isAdmin, isSuperAdm
     let income = 0;
     let expense = 0;
     filteredAccounts.forEach(acc => {
-      if (acc.isOpeningBalance) {
-        // Opening balance is not counted as monthly income/expense
+      if (acc.isOpeningBalance || acc.isAdvanceAllocation) {
+        // Opening balance and advance allocations are not counted as monthly income/expense
         return;
       }
       if (acc.isWithdrawal) {
@@ -3128,8 +5203,18 @@ function AccountsManagement({ accounts, residents, payments, isAdmin, isSuperAdm
           await addDoc(collection(db, 'accounts'), entry);
         }
       } else {
+        const flat = extractFlatNumber(newEntry.particulars || '');
+        const owner = residents.find(r => extractFlatNumber(r.flatNumber || '') === flat);
+        const tenantName = getTenantName(newEntry.particulars || '');
+        
+        // Auto-append tenant name if it's a maintenance-like entry and tenant exists
+        let finalParticulars = newEntry.particulars;
+        if (tenantName && !finalParticulars?.includes(`Tenant: ${tenantName}`)) {
+          finalParticulars = `${finalParticulars} (Tenant: ${tenantName})`;
+        }
+
         const entryData = {
-          particulars: newEntry.particulars,
+          particulars: finalParticulars,
           income: (isWithdrawal || isOpeningBalance) ? 0 : (newEntry.income || 0),
           expense: (isWithdrawal || isOpeningBalance) ? 0 : (newEntry.expense || 0),
           method: isCheque ? 'bank' : newEntry.method || 'cash',
@@ -3140,7 +5225,10 @@ function AccountsManagement({ accounts, residents, payments, isAdmin, isSuperAdm
           openingExpense: newEntry.openingExpense || 0,
           forMonth: newEntry.forMonth || null,
           forYear: newEntry.forYear || null,
-          date: newEntry.date instanceof Date ? Timestamp.fromDate(newEntry.date) : newEntry.date as Timestamp
+          date: newEntry.date instanceof Date ? Timestamp.fromDate(newEntry.date) : newEntry.date as Timestamp,
+          flatNumber: flat,
+          ownerUid: owner?.uid,
+          ownerName: owner?.displayName
         };
 
         if (editingEntry) {
@@ -3192,6 +5280,22 @@ function AccountsManagement({ accounts, residents, payments, isAdmin, isSuperAdm
       
       if (entrySnap.exists()) {
         const data = entrySnap.data();
+        let flat = data.flatNumber || data.particulars?.split(' ')[0];
+        let ownerUid = data.ownerUid;
+
+        // If ownerUid is missing, try to find it from residents list by matching flat and name
+        if (!ownerUid && data.particulars) {
+          const parts = data.particulars.split(' (')[0].split(' ');
+          // Try to find a resident that matches the flat and name in particulars
+          const resident = residents.find(r => 
+            data.particulars.startsWith(r.flatNumber || '') && 
+            data.particulars.includes(r.displayName)
+          );
+          if (resident) {
+            ownerUid = resident.uid;
+            flat = resident.flatNumber;
+          }
+        }
         
         // 2. Delete associated shadow entries in 'accounts' using parentAccountId
         const qShadow = query(collection(db, 'accounts'), where('parentAccountId', '==', deletingId));
@@ -3208,66 +5312,60 @@ function AccountsManagement({ accounts, residents, payments, isAdmin, isSuperAdm
         }
 
         // 4. Heuristic for older entries or shadow entries without parentAccountId
-        if (data.isAdvanceAllocation) {
-          // If it's a shadow entry, find corresponding payment by flat and month
-          const monthIdx = MONTHS.indexOf(data.forMonth);
-          if (monthIdx !== -1) {
-            const monthKey = `${data.forYear}-${String(monthIdx + 1).padStart(2, '0')}`;
-            
-            // Try to find the payment record
-            let qP;
-            if (data.ownerUid && data.flatNumber) {
-              qP = query(collection(db, 'payments'), 
-                where('ownerUid', '==', data.ownerUid), 
+        if (data.isAdvanceAllocation || (data.income > 0 && !data.isOpeningBalance && !data.isWithdrawal)) {
+          const monthToUse = data.forMonth;
+          const yearToUse = data.forYear;
+
+          if (monthToUse && yearToUse) {
+            const monthIdx = MONTHS.indexOf(monthToUse);
+            if (monthIdx !== -1) {
+              const monthKey = `${yearToUse}-${String(monthIdx + 1).padStart(2, '0')}`;
+              
+              // Try to find the payment record by deterministic ID
+              if (ownerUid) {
+                const detId = `${ownerUid}_${monthKey}`;
+                await deleteDoc(doc(db, 'payments', detId));
+              }
+              
+              // Also query by flat and month just in case
+              const qP = query(collection(db, 'payments'), 
+                where('flatNumber', '==', flat || ''), 
                 where('month', '==', monthKey)
               );
-            } else {
-              // Fallback to searching by month
-              qP = query(collection(db, 'payments'), where('month', '==', monthKey));
-            }
-            
-            const pSnap = await getDocs(qP);
-            const normalizeFlat = (f: string) => f.replace(/^0+/, '').toUpperCase();
-            for (const d of pSnap.docs) {
-              const pData = d.data() as any;
-              // Only delete if it's a manual payment
-              if (pData.transactionId?.startsWith('MANUAL_')) {
-                // Match by ownerUid or by normalized flat number
-                const entryFlat = normalizeFlat(data.particulars.split(' ')[0]);
-                const paymentFlat = normalizeFlat(pData.flatNumber);
-                
-                if (data.ownerUid && pData.ownerUid === data.ownerUid) {
-                  await deleteDoc(doc(db, 'payments', d.id));
-                } else if (entryFlat === paymentFlat) {
+              
+              const pSnap = await getDocs(qP);
+              for (const d of pSnap.docs) {
+                const pData = d.data() as any;
+                // Only delete if it's a manual entry or linked to this account
+                if (pData.source === 'Manual' || pData.parentAccountId === deletingId || pData.ownerUid === ownerUid) {
                   await deleteDoc(doc(db, 'payments', d.id));
                 }
               }
             }
           }
-        } else if (data.income > 0 && !data.isOpeningBalance && !data.isWithdrawal) {
-          // If it's a main entry, try to find associated payments by particulars
-          const qP = query(collection(db, 'payments'), where('particulars', '==', `Manual Entry: ${data.particulars}`));
-          const pSnap = await getDocs(qP);
-          for (const d of pSnap.docs) {
-            await deleteDoc(doc(db, 'payments', d.id));
-          }
+          
+          // Additional cleanup for main entries
+          if (data.income > 0 && !data.isAdvanceAllocation) {
+            const qPExtra = query(collection(db, 'payments'), where('particulars', '==', `Manual Entry: ${data.particulars}`));
+            const pSnapExtra = await getDocs(qPExtra);
+            for (const d of pSnapExtra.docs) {
+              await deleteDoc(doc(db, 'payments', d.id));
+            }
 
-          // Also try to find shadow entries if they don't have parentAccountId
-          // We can parse the particulars to find the flat number
-          const firstSpaceIdx = data.particulars.indexOf(' ');
-          if (firstSpaceIdx !== -1) {
-            const flat = data.particulars.substring(0, firstSpaceIdx);
-            const qS = query(collection(db, 'accounts'), 
-              where('isAdvanceAllocation', '==', true)
-            );
-            const sSnap = await getDocs(qS);
-            for (const d of sSnap.docs) {
-              const sData = d.data() as any;
-              if (sData.particulars.startsWith(flat) && sData.originalPaymentDate) {
-                const sDate = sData.originalPaymentDate instanceof Date ? sData.originalPaymentDate : sData.originalPaymentDate.toDate();
-                const dDate = data.date instanceof Date ? data.date : data.date?.toDate();
-                if (dDate && sDate.getTime() === dDate.getTime()) {
-                  await deleteDoc(doc(db, 'accounts', d.id));
+            // Also try to find shadow entries if they don't have parentAccountId
+            if (flat) {
+              const qS = query(collection(db, 'accounts'), where('isAdvanceAllocation', '==', true));
+              const sSnap = await getDocs(qS);
+              for (const d of sSnap.docs) {
+                const sData = d.data() as any;
+                const sFlat = sData.flatNumber || sData.particulars?.split(' (')[0]?.split(' ').slice(0, 2).join(' ');
+                
+                if ((sData.flatNumber === flat || sData.particulars.startsWith(flat)) && sData.originalPaymentDate) {
+                  const sDate = sData.originalPaymentDate instanceof Date ? sData.originalPaymentDate : sData.originalPaymentDate.toDate();
+                  const dDate = data.date instanceof Date ? data.date : data.date?.toDate();
+                  if (dDate && sDate.getTime() === dDate.getTime()) {
+                    await deleteDoc(doc(db, 'accounts', d.id));
+                  }
                 }
               }
             }
@@ -3277,7 +5375,7 @@ function AccountsManagement({ accounts, residents, payments, isAdmin, isSuperAdm
 
       await deleteDoc(entryRef);
       setDeletingId(null);
-      toast.success("Transaction deleted successfully");
+      toast.success("Transaction and all associated records deleted");
     } catch (err) {
       console.error("Error deleting entry:", err);
       handleFirestoreError(err, OperationType.DELETE, `accounts/${deletingId}`);
@@ -3397,7 +5495,7 @@ function AccountsManagement({ accounts, residents, payments, isAdmin, isSuperAdm
                 onClick={() => setShowQuickModal(true)}
                 className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl font-bold transition-all shadow-lg shadow-emerald-900/20 border border-emerald-500"
               >
-                <Zap size={18} />
+                <FileText size={18} />
                 Post Maintenance
               </button>
               <button 
@@ -3450,7 +5548,16 @@ function AccountsManagement({ accounts, residents, payments, isAdmin, isSuperAdm
                         "text-neutral-300",
                         acc.isAdvanceAllocation && "text-yellow-500/80 italic text-sm"
                       )}>
-                        {acc.particulars}
+                        {(() => {
+                          const tenantName = getTenantName(acc.particulars);
+                          if (tenantName && !acc.particulars.includes(`Tenant: ${tenantName}`)) {
+                            // If it's a maintenance entry (has flat number) but missing tenant name, append it
+                            if (acc.income > 0 || acc.isAdvanceAllocation) {
+                              return `${acc.particulars} (Tenant: ${tenantName})`;
+                            }
+                          }
+                          return acc.particulars;
+                        })()}
                       </span>
                       {acc.method === 'bank' && !acc.isAdvanceAllocation && <span className="ml-2 text-[10px] bg-blue-900/30 text-blue-400 px-2 py-0.5 rounded-full font-bold uppercase">Bank</span>}
                       {acc.isWithdrawal && <span className="ml-2 text-[10px] bg-amber-900/30 text-amber-400 px-2 py-0.5 rounded-full font-bold uppercase">Withdrawal</span>}
@@ -3487,7 +5594,13 @@ function AccountsManagement({ accounts, residents, payments, isAdmin, isSuperAdm
                                     ? "bg-rose-600 text-white shadow-lg shadow-rose-900/20 scale-110" 
                                     : "bg-neutral-800 text-neutral-400"
                                 )}>
-                                  {acc.forMonth} {acc.forYear}
+                                  {(() => {
+                                    if (acc.isAdvanceAllocation) {
+                                      const d = new Date(acc.forYear || 0, MONTHS.indexOf(acc.forMonth) - 1, 1);
+                                      return `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+                                    }
+                                    return `${acc.forMonth} ${acc.forYear}`;
+                                  })()}
                                 </span>
                                 {isRed && (
                                   <span className="text-[9px] font-black text-rose-500 uppercase tracking-tighter animate-pulse">
@@ -3526,26 +5639,37 @@ function AccountsManagement({ accounts, residents, payments, isAdmin, isSuperAdm
                         <span className="text-xs text-blue-400">B: ₹{acc.runningBankBalance?.toLocaleString()}</span>
                       </div>
                     </td>
-                    {isSuperAdmin && (
-                      <td className="px-6 py-4 text-center">
+                    <td className="px-6 py-4 text-center">
                         <div className="flex items-center justify-center gap-1">
-                          <button 
-                            onClick={() => handleEditClick(acc)}
-                            className="p-2 text-neutral-600 hover:text-indigo-400 transition-colors"
-                            title="Edit"
-                          >
-                            <Edit2 size={16} />
-                          </button>
-                          <button 
-                            onClick={() => setDeletingId(acc.id)}
-                            className="p-2 text-neutral-600 hover:text-rose-400 transition-colors"
-                            title="Delete"
-                          >
-                            <Trash2 size={16} />
-                          </button>
+                          {acc.forMonth && (acc.income > 0 || acc.amount > 0) && (
+                            <button 
+                              onClick={() => handleDownloadReceipt(acc)}
+                              className="p-2 text-neutral-600 hover:text-emerald-400 transition-colors"
+                              title="Download Receipt"
+                            >
+                              <Download size={16} />
+                            </button>
+                          )}
+                          {isSuperAdmin && (
+                            <>
+                              <button 
+                                onClick={() => handleEditClick(acc)}
+                                className="p-2 text-neutral-600 hover:text-indigo-400 transition-colors"
+                                title="Edit"
+                              >
+                                <Edit2 size={16} />
+                              </button>
+                              <button 
+                                onClick={() => setDeletingId(acc.id)}
+                                className="p-2 text-neutral-600 hover:text-rose-400 transition-colors"
+                                title="Delete"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </>
+                          )}
                         </div>
                       </td>
-                    )}
                   </tr>
                 ))
               )}
@@ -3578,7 +5702,7 @@ function AccountsManagement({ accounts, residents, payments, isAdmin, isSuperAdm
               <div className="flex items-center justify-between mb-6">
                 <div>
                   <h3 className="text-2xl font-bold text-neutral-100">Post Maintenance Receipts</h3>
-                  <p className="text-sm text-neutral-500">Select residents to record their online maintenance payments manually.</p>
+                  <p className="text-sm text-neutral-500">Select owners to record their online maintenance payments manually.</p>
                 </div>
                 <button onClick={() => setShowQuickModal(false)} className="p-2 text-neutral-500 hover:text-neutral-300">
                   <X size={24} />
@@ -3639,8 +5763,10 @@ function AccountsManagement({ accounts, residents, payments, isAdmin, isSuperAdm
                 <input 
                   type="date" 
                   value={format(newEntry.date as Date, 'yyyy-MM-dd')}
+                  onClick={(e) => (e.currentTarget as any).showPicker?.()}
+                  onFocus={(e) => (e.currentTarget as any).showPicker?.()}
                   onChange={(e) => setNewEntry({ ...newEntry, date: new Date(e.target.value) })}
-                  className="w-full px-4 py-3 bg-neutral-800 border border-neutral-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100"
+                  className="w-full px-4 py-3 bg-neutral-800 border border-neutral-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-neutral-100 cursor-pointer relative"
                 />
               </div>
               <div>

@@ -54,7 +54,6 @@ service cloud.firestore {
     function isAdmin() {
       return isAuthenticated() &&
         (request.auth.token.email == "whitepalaceapartment@gmail.com" ||
-         request.auth.token.email == "jkrsanskrit@gmail.com" ||
          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
           (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'superadmin')));
@@ -64,7 +63,7 @@ service cloud.firestore {
       return data.keys().hasAll(['uid', 'email', 'role']) &&
              data.uid is string &&
              data.email is string &&
-             data.role in ['admin', 'owner'] &&
+             data.role in ['admin', 'owner', 'superadmin'] &&
              (!('mustChangePassword' in data) || data.mustChangePassword is bool);
     }
 
@@ -111,14 +110,14 @@ service cloud.firestore {
     // ===============================================================
 
     match /users/{userId} {
-      allow read: if isAuthenticated() && (isOwner(userId) || isAdmin());
+      allow read: if isAuthenticated();
       allow create: if isAuthenticated() && (isOwner(userId) || isAdmin()) && isValidUser(request.resource.data) && (request.resource.data.role == 'owner' || isAdmin());
       allow update: if isAuthenticated() && (isAdmin() || (isOwner(userId) && isValidUser(request.resource.data)));
       allow delete: if isAdmin() && request.auth.uid != userId;
     }
 
     match /payments/{paymentId} {
-      allow read: if isAuthenticated() && (request.auth.uid == resource.data.ownerUid || isAdmin());
+      allow read: if isAuthenticated();
       allow create: if isAuthenticated() && (request.auth.uid == request.resource.data.ownerUid || isAdmin()) && isValidPayment(request.resource.data);
       allow update: if isAuthenticated() && (isAdmin() || (request.auth.uid == resource.data.ownerUid && request.resource.data.ownerUid == resource.data.ownerUid && isValidPayment(request.resource.data)));
       allow delete: if isAdmin();
@@ -134,6 +133,10 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow create, update: if isAdmin() && isValidAccount(request.resource.data);
       allow delete: if isAdmin();
+    }
+
+    match /config/{configId} {
+      allow read, write: if isAdmin();
     }
   }
 }
