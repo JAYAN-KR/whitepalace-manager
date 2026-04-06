@@ -1,22 +1,14 @@
+const CACHE_NAME = 'whitepalace-v1';
+
 self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cacheName) => {
-          return caches.delete(cacheName);
-        })
-      );
-    }).then(() => {
-      return self.registration.unregister();
-    })
-  );
+  event.waitUntil(self.clients.claim());
 });
 
 self.addEventListener('fetch', (event) => {
-  // Pass through all requests to the network
-  return;
+  // Simple pass-through fetch handler
+  event.respondWith(fetch(event.request));
 });

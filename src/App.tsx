@@ -288,7 +288,7 @@ const LoadingScreen = () => (
   </div>
 );
 
-const LoginScreen = ({ onShowLegal }: { onShowLegal: () => void }) => {
+const LoginScreen = ({ onShowLegal, setShowManual }: { onShowLegal: () => void, setShowManual: (show: boolean) => void }) => {
   const [loginMode, setLoginMode] = useState<'email' | 'flat'>('flat');
   const [email, setEmail] = useState('');
   const [flatNumber, setFlatNumber] = useState('');
@@ -470,7 +470,44 @@ const LoginScreen = ({ onShowLegal }: { onShowLegal: () => void }) => {
           Google
         </button>
 
-        <div className="mt-8 text-center">
+        <div className="mt-8 p-4 bg-indigo-950/30 border border-indigo-900/30 rounded-2xl">
+          <h4 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+            <PlusCircle size={14} />
+            How to Get Full Screen (Icon)
+          </h4>
+          <div className="space-y-4">
+            <div className="bg-rose-900/20 p-2 rounded-lg border border-rose-900/40">
+              <p className="text-[9px] text-rose-300 font-bold mb-1">CRITICAL: Uninstall Old Icon First</p>
+              <p className="text-[9px] text-neutral-400 leading-relaxed">
+                If you already have an icon on your home screen, you <span className="text-rose-400 font-bold underline">MUST UNINSTALL</span> it first. Otherwise, the new full-screen settings won't work.
+              </p>
+            </div>
+            <div className="bg-indigo-900/20 p-2 rounded-lg border border-indigo-900/40">
+              <p className="text-[9px] text-indigo-300 font-bold mb-1">Step 1: Open in Browser</p>
+              <p className="text-[9px] text-neutral-400 leading-relaxed">
+                Open the link in <span className="text-indigo-400 font-bold">Chrome</span> (Android) or <span className="text-indigo-400 font-bold">Safari</span> (iPhone). If you are in WhatsApp, tap the menu and select "Open in Browser".
+              </p>
+            </div>
+            <div className="flex items-start gap-3">
+              <div className="w-5 h-5 rounded-full bg-indigo-900/50 flex items-center justify-center text-[10px] font-bold text-indigo-300 shrink-0 mt-0.5">2</div>
+              <p className="text-[10px] text-neutral-400 leading-relaxed">
+                <span className="text-neutral-200 font-bold">Install:</span> Tap the <span className="text-indigo-400 font-bold">three dots</span> (Android) or <span className="text-indigo-400 font-bold">Share</span> (iPhone) and select <span className="text-indigo-400 font-bold">"Install app"</span> or <span className="text-indigo-400 font-bold">"Add to Home Screen"</span>.
+              </p>
+            </div>
+            <p className="text-[9px] text-neutral-500 italic mt-2 pl-8">
+              * Once added, open the icon from your home screen to enjoy the full-screen experience.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-8 text-center flex flex-col gap-4">
+          <button 
+            onClick={() => setShowManual(true)}
+            className="text-xs font-bold text-indigo-400 hover:text-indigo-300 uppercase tracking-widest flex items-center justify-center gap-2"
+          >
+            <BookOpen size={14} />
+            View User Manual
+          </button>
           <button 
             onClick={onShowLegal}
             className="text-xs font-bold text-neutral-500 hover:text-neutral-300 uppercase tracking-widest"
@@ -998,7 +1035,7 @@ function LegalSection({ onBack }: { onBack?: () => void }) {
   );
 }
 
-function LandingPage({ onLogin, onShowLegal }: { onLogin: () => void, onShowLegal: () => void }) {
+function LandingPage({ onLogin, onShowLegal, setShowManual }: { onLogin: () => void, onShowLegal: () => void, setShowManual: (show: boolean) => void }) {
   return (
     <div className="min-h-screen bg-neutral-950">
       {/* Hero Section */}
@@ -1019,6 +1056,13 @@ function LandingPage({ onLogin, onShowLegal }: { onLogin: () => void, onShowLega
               className="px-8 py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-500 transition-all shadow-lg shadow-indigo-900/20"
             >
               Access Owner Portal
+            </button>
+            <button 
+              onClick={() => setShowManual(true)}
+              className="px-8 py-4 bg-neutral-800 border border-neutral-700 text-neutral-300 rounded-2xl font-bold hover:bg-neutral-700 transition-all flex items-center justify-center gap-2"
+            >
+              <BookOpen size={20} />
+              User Manual
             </button>
             <button 
               onClick={onShowLegal}
@@ -1164,6 +1208,7 @@ export default function App() {
   const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' ? window.innerWidth < 768 : false);
   const [showLegalPublic, setShowLegalPublic] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
+  const [showManual, setShowManual] = useState(false);
   
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
 
@@ -1395,38 +1440,35 @@ export default function App() {
 
   if (loading) return <LoadingScreen />;
   
-  if (showLegalPublic) {
-    return (
-      <div className="min-h-screen bg-neutral-950 p-4 md:p-8">
-        <div className="max-w-4xl mx-auto">
-          <LegalSection onBack={() => setShowLegalPublic(false)} />
-        </div>
-      </div>
-    );
-  }
-
-  if (!user || !profile) {
-    if (showLogin) {
-      return <LoginScreen onShowLegal={() => setShowLegalPublic(true)} />;
-    }
-    return <LandingPage onLogin={() => setShowLogin(true)} onShowLegal={() => setShowLegalPublic(true)} />;
-  }
-
-  const isSuperAdmin = profile.role === 'superadmin' || 
-    profile.email === 'whitepalaceapartment@gmail.com';
-  const isAdmin = profile.role === 'admin' || 
-    profile.role === 'superadmin' || 
-    profile.email === 'whitepalaceapartment@gmail.com';
-  const isOwner = profile.role === 'owner';
+  const isSuperAdmin = profile?.role === 'superadmin' || 
+    profile?.email === 'whitepalaceapartment@gmail.com';
+  const isAdmin = profile?.role === 'admin' || 
+    profile?.role === 'superadmin' || 
+    profile?.email === 'whitepalaceapartment@gmail.com';
+  const isOwner = profile?.role === 'owner';
 
   return (
     <ErrorBoundary>
       <Toaster position="top-center" richColors />
-      <div className="min-h-screen bg-neutral-950 flex flex-col">
-        {profile?.mustChangePassword && user && <PasswordChangeOverlay user={user} />}
-        
-        {/* Top Header - Full Width */}
-        {(!isMobile || activeTab === 'dashboard') && (
+      
+      {showLegalPublic ? (
+        <div className="min-h-screen bg-neutral-950 p-4 md:p-8">
+          <div className="max-w-4xl mx-auto">
+            <LegalSection onBack={() => setShowLegalPublic(false)} />
+          </div>
+        </div>
+      ) : !user || !profile ? (
+        showLogin ? (
+          <LoginScreen onShowLegal={() => setShowLegalPublic(true)} setShowManual={setShowManual} />
+        ) : (
+          <LandingPage onLogin={() => setShowLogin(true)} onShowLegal={() => setShowLegalPublic(true)} setShowManual={setShowManual} />
+        )
+      ) : (
+        <div className="min-h-screen bg-neutral-950 flex flex-col">
+          {profile?.mustChangePassword && user && <PasswordChangeOverlay user={user} />}
+          
+          {/* Top Header - Full Width */}
+          {(!isMobile || activeTab === 'dashboard') && (
           <>
             <header className={cn(
               "w-full text-center border-b border-neutral-800 bg-neutral-900/30 backdrop-blur-sm z-30",
@@ -1526,6 +1568,13 @@ export default function App() {
               icon={<ShieldCheck size={20} />}
               label="Legal & Policies"
               activeColor="slate"
+            />
+            <SidebarItem 
+              active={false} 
+              onClick={() => setShowManual(true)}
+              icon={<BookOpen size={20} />}
+              label="User Manual"
+              activeColor="indigo"
             />
           </nav>
 
@@ -1704,8 +1753,13 @@ export default function App() {
         </AnimatePresence>
         </div>
       </main>
-    </div>
-    </div>
+        </div>
+      </div>
+    )}
+
+      {showManual && (
+        <UserManual onClose={() => setShowManual(false)} />
+      )}
     </ErrorBoundary>
   );
 }
@@ -6081,6 +6135,200 @@ function AccountsManagement({ accounts, residents, payments, isAdmin, isSuperAdm
           </motion.div>
         </div>
       )}
+    </div>
+  );
+}
+
+
+function UserManual({ onClose }: { onClose: () => void }) {
+  const handleDownloadPDF = () => {
+    window.print();
+  };
+
+  return (
+    <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/90 backdrop-blur-md p-4 overflow-y-auto print:p-0 print:bg-white print:block">
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="bg-neutral-900 border border-neutral-800 w-full max-w-4xl rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] print:max-h-none print:shadow-none print:border-none print:bg-white print:text-black print:rounded-none"
+      >
+        {/* Header - Hidden in Print */}
+        <div className="p-6 border-b border-neutral-800 flex items-center justify-between bg-neutral-900 sticky top-0 z-10 print:hidden">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white">
+              <BookOpen size={20} />
+            </div>
+            <div>
+              <h3 className="text-xl font-bold text-neutral-100">User Manual</h3>
+              <p className="text-xs text-neutral-500">WhitePalace Apartment Management</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={handleDownloadPDF}
+              className="flex items-center gap-2 px-4 py-2 bg-neutral-800 text-neutral-300 rounded-xl font-bold hover:bg-neutral-700 transition-all border border-neutral-700"
+            >
+              <Download size={18} />
+              Download PDF
+            </button>
+            <button onClick={onClose} className="p-2 text-neutral-500 hover:text-neutral-300 transition-colors">
+              <X size={24} />
+            </button>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="p-8 overflow-y-auto space-y-12 print:overflow-visible print:p-0 print:space-y-8">
+          {/* Cover Section - Print Only */}
+          <div className="hidden print:block text-center py-20 border-b-4 border-indigo-600 mb-12">
+            <h1 className="text-5xl font-black text-black mb-4 uppercase tracking-tighter">WhitePalace</h1>
+            <h2 className="text-2xl font-bold text-neutral-600 uppercase tracking-widest">Resident User Manual</h2>
+            <p className="mt-8 text-neutral-500">Official Guide for Apartment Management System</p>
+          </div>
+
+          {/* Section 1: Installation */}
+          <section className="space-y-6">
+            <div className="flex items-center gap-4 border-b border-neutral-800 pb-4 print:border-neutral-200">
+              <div className="w-12 h-12 bg-blue-600/20 text-blue-400 rounded-2xl flex items-center justify-center print:bg-blue-100 print:text-blue-600">
+                <PlusCircle size={24} />
+              </div>
+              <h4 className="text-2xl font-bold text-neutral-100 print:text-black">1. Installation & Setup</h4>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 print:grid-cols-1">
+              <div className="bg-neutral-800/50 p-6 rounded-2xl border border-neutral-800 print:bg-white print:border-neutral-200">
+                <h5 className="font-bold text-indigo-400 mb-4 flex items-center gap-2 uppercase tracking-wider text-sm">
+                  Android Devices
+                </h5>
+                <ol className="space-y-3 text-neutral-400 text-sm list-decimal ml-4 print:text-neutral-700">
+                  <li>Open the app link in <strong>Google Chrome</strong> browser.</li>
+                  <li>Tap the <strong>three dots (⋮)</strong> in the top right corner.</li>
+                  <li>Select <strong>"Install app"</strong> or <strong>"Add to Home screen"</strong>.</li>
+                  <li>Confirm the installation. The app icon will appear on your home screen.</li>
+                  <li>Open the app from the home screen for a full-screen experience.</li>
+                </ol>
+              </div>
+
+              <div className="bg-neutral-800/50 p-6 rounded-2xl border border-neutral-800 print:bg-white print:border-neutral-200">
+                <h5 className="font-bold text-indigo-400 mb-4 flex items-center gap-2 uppercase tracking-wider text-sm">
+                  iPhone (iOS) Devices
+                </h5>
+                <ol className="space-y-3 text-neutral-400 text-sm list-decimal ml-4 print:text-neutral-700">
+                  <li>Open the app link in <strong>Safari</strong> browser.</li>
+                  <li>Tap the <strong>Share button</strong> (square with up arrow) at the bottom.</li>
+                  <li>Scroll down and tap <strong>"Add to Home Screen"</strong>.</li>
+                  <li>Tap <strong>"Add"</strong> in the top right corner.</li>
+                  <li>The WhitePalace icon will now be available on your home screen.</li>
+                </ol>
+              </div>
+            </div>
+            <div className="p-4 bg-amber-900/20 border border-amber-900/50 rounded-xl print:bg-amber-50 print:border-amber-200">
+              <p className="text-xs text-amber-400 font-medium flex items-center gap-2 print:text-amber-700">
+                <AlertTriangle size={14} />
+                <strong>Important:</strong> If you are updating, please uninstall the old icon from your home screen first, then clear browser cache and install again.
+              </p>
+            </div>
+          </section>
+
+          {/* Section 2: Login */}
+          <section className="space-y-6">
+            <div className="flex items-center gap-4 border-b border-neutral-800 pb-4 print:border-neutral-200">
+              <div className="w-12 h-12 bg-emerald-600/20 text-emerald-400 rounded-2xl flex items-center justify-center print:bg-emerald-100 print:text-emerald-600">
+                <UserIcon size={24} />
+              </div>
+              <h4 className="text-2xl font-bold text-neutral-100 print:text-black">2. Accessing Your Account</h4>
+            </div>
+            
+            <div className="space-y-4 text-neutral-400 text-sm print:text-neutral-700">
+              <p>There are two ways to access your flat's dashboard:</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 print:grid-cols-1">
+                <div className="p-4 border border-neutral-800 rounded-xl print:border-neutral-200">
+                  <p className="font-bold text-neutral-200 mb-2 print:text-black">Option A: Flat Number Login</p>
+                  <p>Enter your Flat Number (e.g., A 1) and the temporary password provided by the association.</p>
+                </div>
+                <div className="p-4 border border-neutral-800 rounded-xl print:border-neutral-200">
+                  <p className="font-bold text-neutral-200 mb-2 print:text-black">Option B: Google Login</p>
+                  <p>If your email is registered with the association, you can simply use "Sign in with Google" for one-tap access.</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Section 3: Maintenance Payments */}
+          <section className="space-y-6">
+            <div className="flex items-center gap-4 border-b border-neutral-800 pb-4 print:border-neutral-200">
+              <div className="w-12 h-12 bg-rose-600/20 text-rose-400 rounded-2xl flex items-center justify-center print:bg-rose-100 print:text-rose-600">
+                <CreditCard size={24} />
+              </div>
+              <h4 className="text-2xl font-bold text-neutral-100 print:text-black">3. Maintenance Payments</h4>
+            </div>
+            
+            <div className="space-y-4 text-neutral-400 text-sm print:text-neutral-700">
+              <div className="bg-neutral-800/30 p-6 rounded-2xl print:bg-neutral-50">
+                <h5 className="font-bold text-neutral-200 mb-4 print:text-black">Payment Rules & Schedule</h5>
+                <ul className="space-y-2 list-disc ml-4">
+                  <li><strong>Monthly Amount:</strong> ₹1,200 per flat.</li>
+                  <li><strong>Due Date:</strong> Payments must be made by the <strong>10th</strong> of every month.</li>
+                  <li><strong>Late Fee:</strong> Payments made after the 10th may incur a penalty as decided by the association.</li>
+                  <li><strong>Payment Method:</strong> Currently, we support bank transfers and UPI. Please upload the screenshot of your payment for verification.</li>
+                </ul>
+              </div>
+              
+              <div className="p-4 border border-neutral-800 rounded-xl print:border-neutral-200">
+                <p className="font-bold text-neutral-200 mb-2 print:text-black">How to Pay:</p>
+                <ol className="list-decimal ml-4 space-y-1">
+                  <li>Go to the <strong>"Payments"</strong> tab in your dashboard.</li>
+                  <li>Select the month you are paying for.</li>
+                  <li>Enter the transaction details and upload the receipt/screenshot.</li>
+                  <li>Once submitted, the admin will verify and approve the payment.</li>
+                  <li>You can download the official receipt once approved.</li>
+                </ol>
+              </div>
+            </div>
+          </section>
+
+          {/* Section 4: Announcements */}
+          <section className="space-y-6">
+            <div className="flex items-center gap-4 border-b border-neutral-800 pb-4 print:border-neutral-200">
+              <div className="w-12 h-12 bg-amber-600/20 text-amber-400 rounded-2xl flex items-center justify-center print:bg-amber-100 print:text-amber-600">
+                <Megaphone size={24} />
+              </div>
+              <h4 className="text-2xl font-bold text-neutral-100 print:text-black">4. Stay Updated</h4>
+            </div>
+            <p className="text-neutral-400 text-sm print:text-neutral-700">
+              Check the <strong>"Announcements"</strong> section regularly for important updates regarding water supply, electricity maintenance, association meetings, and other community news.
+            </p>
+          </section>
+
+          {/* Section 5: Support */}
+          <section className="space-y-6 pb-12">
+            <div className="flex items-center gap-4 border-b border-neutral-800 pb-4 print:border-neutral-200">
+              <div className="w-12 h-12 bg-indigo-600/20 text-indigo-400 rounded-2xl flex items-center justify-center print:bg-indigo-100 print:text-indigo-600">
+                <Phone size={24} />
+              </div>
+              <h4 className="text-2xl font-bold text-neutral-100 print:text-black">5. Support & Contact</h4>
+            </div>
+            <div className="bg-neutral-800/50 p-6 rounded-2xl border border-neutral-800 print:bg-white print:border-neutral-200">
+              <p className="text-neutral-400 text-sm mb-4 print:text-neutral-700">
+                If you face any issues with the app or have questions regarding your maintenance, please contact:
+              </p>
+              <div className="space-y-2">
+                <p className="text-neutral-200 font-bold flex items-center gap-2 print:text-black">
+                  <Contact size={16} className="text-indigo-400" />
+                  Association Secretary
+                </p>
+                <p className="text-neutral-400 text-sm print:text-neutral-700">Email: whitepalaceapartment@gmail.com</p>
+              </div>
+            </div>
+          </section>
+
+          {/* Footer - Print Only */}
+          <div className="hidden print:block text-center pt-12 border-t border-neutral-200 text-[10px] text-neutral-400">
+            <p>© 2026 WhitePalace Apartment Owners Association. All rights reserved.</p>
+            <p>This manual is for internal use by residents only.</p>
+          </div>
+        </div>
+      </motion.div>
     </div>
   );
 }
